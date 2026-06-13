@@ -327,7 +327,8 @@ type只能是bull/bear/call。call時sellStrike和sellPremium為null。"""
                             for i, r in enumerate(results[:3]):
                                 type_label = "Bull Call Spread" if r["type"] == "bull" else "Bear Put Spread" if r["type"] == "bear" else "單買 Call"
                                 with st.expander(f"{rank_icons[i]} {type_label} — 報酬率 {r['ror']}%　最大獲利 +${r['maxProfit']}", expanded=(i==0)):
-                                    st.markdown(f"**組合：** ${r['buyStrike']}{f' / ${r[\"sellStrike\"]}' if r.get('sellStrike') else ''}")
+                                    sell_info = f" / ${r['sellStrike']}" if r.get('sellStrike') else ""
+                                    st.markdown(f"**組合：** ${r['buyStrike']}{sell_info}")
                                     col1, col2, col3, col4 = st.columns(4)
                                     col1.metric("最大獲利", f"+${r['maxProfit']}")
                                     col2.metric("最大虧損", f"-${r['maxLoss']}")
