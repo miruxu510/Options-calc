@@ -1,3 +1,5 @@
 streamlit
 anthropic
 pillow
+yfinance
+streamlit-local-storage
