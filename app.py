@@ -186,68 +186,140 @@ def find_be(legs, cur):
             return pts[i-1]+frac*(pts[i]-pts[i-1])
     return None
 
+
+def analyze_legs(legs, strat=None):
+    if not legs:
+        return {"max_profit": None, "max_loss": 0, "cost": 0, "unlimited": False}
+    debit = 0
+    credit = 0
+    if "buyCall" in legs: debit += legs["buyCall"]["prem"] * 100
+    if "buyPut" in legs: debit += legs["buyPut"]["prem"] * 100
+    if "sellCall" in legs: credit += legs["sellCall"]["prem"] * 100
+    if "sellPut" in legs: credit += legs["sellPut"]["prem"] * 100
+    net_debit = debit - credit
+
+    if "buyCall" in legs and "sellCall" in legs and len(legs) == 2:
+        width = abs(legs["sellCall"]["strike"] - legs["buyCall"]["strike"]) * 100
+        max_loss = max(net_debit, 0)
+        max_profit = max(width - net_debit, 0)
+        return {"max_profit": max_profit, "max_loss": max_loss, "cost": max_loss, "unlimited": False}
+
+    if "buyPut" in legs and "sellPut" in legs and len(legs) == 2:
+        width = abs(legs["buyPut"]["strike"] - legs["sellPut"]["strike"]) * 100
+        max_loss = max(net_debit, 0)
+        max_profit = max(width - net_debit, 0)
+        return {"max_profit": max_profit, "max_loss": max_loss, "cost": max_loss, "unlimited": False}
+
+    if ("buyCall" in legs or "buyPut" in legs) and len(legs) == 1:
+        return {"max_profit": None, "max_loss": max(net_debit, 0), "cost": max(net_debit, 0), "unlimited": True}
+
+    strikes = [l["strike"] for l in legs.values()]
+    lo = max(0, min(strikes) * 0.25)
+    hi = max(strikes) * 2.5
+    pts = [lo + (hi - lo) * i / 500 for i in range(501)]
+    vals = [pnl_at(legs, x) for x in pts]
+    return {"max_profit": max(vals), "max_loss": abs(min(vals)), "cost": abs(min(vals)), "unlimited": False}
+
+def scenario_prices(cur, legs):
+    strikes = sorted({float(v["strike"]) for v in legs.values()})
+    base = cur if cur and cur > 0 else (strikes[0] if strikes else 0)
+    if base <= 0:
+        return strikes
+    step = 1 if base < 80 else (5 if base < 250 else 10)
+    start = math.floor((base * 0.8) / step) * step
+    end = math.ceil((base * 1.35) / step) * step
+    prices = [round(start + step * i, 2) for i in range(int((end - start) / step) + 1)]
+    for x in strikes + [base]:
+        prices.append(round(x, 2))
+    return sorted(set([x for x in prices if x > 0]))
+
+def pnl_table_html(legs, cur, cost):
+    rows = []
+    denom = cost if cost and cost > 0 else 1
+    for price in scenario_prices(cur, legs):
+        pnl = pnl_at(legs, price)
+        pct = pnl / denom * 100
+        color = "#22C55E" if pnl >= 0 else "#EF4444"
+        sign = "+" if pnl >= 0 else ""
+        rows.append(f'''<tr>
+          <td style="padding:8px 10px;border-bottom:1px solid #202020;color:#E5E7EB;font-weight:700">${fmt(price)}</td>
+          <td style="padding:8px 10px;border-bottom:1px solid #202020;text-align:right;color:{color};font-weight:800">{sign}${fmtm(pnl)}</td>
+          <td style="padding:8px 10px;border-bottom:1px solid #202020;text-align:right;color:{color};font-weight:800">{sign}{pct:.0f}%</td>
+        </tr>''')
+    return f'''<div style="background:#141414;border-radius:14px;overflow:hidden;margin-top:10px;border:1px solid #242424">
+      <div style="padding:10px 12px;font-size:12px;font-weight:800;color:#F0F0F0;border-bottom:1px solid #242424">損益表</div>
+      <table style="width:100%;border-collapse:collapse;font-size:12px">
+        <thead><tr style="background:#1C1C1C;color:#888;font-size:10px;text-transform:uppercase;letter-spacing:.5px">
+          <th style="padding:8px 10px;text-align:left">股價</th><th style="padding:8px 10px;text-align:right">損益金額</th><th style="padding:8px 10px;text-align:right">報酬率</th>
+        </tr></thead><tbody>{''.join(rows)}</tbody>
+      </table>
+    </div>'''
+
+
 def make_svg(legs, cur, strat):
-    unlimited = strat in ("call","put")
+    metrics = analyze_legs(legs, strat)
+    unlimited = metrics.get("unlimited", False)
     profit_right = strat in ("bull","call")
     be = find_be(legs, cur)
     strikes = [l["strike"] for l in legs.values()]
     safe_cur = cur if cur and cur>0 else strikes[0]
     center = be if be else safe_cur
     all_pts = strikes + [safe_cur] + ([be] if be else [])
-    span = max(max(all_pts)-min(all_pts), safe_cur*0.16) * 1.5
-    lo = center - span*0.55; hi = center + span*0.55
-    pts = [lo+(hi-lo)*i/200 for i in range(201)]
+    span = max(max(all_pts)-min(all_pts), safe_cur*0.16) * 1.7
+    lo = max(0, center - span*0.55); hi = center + span*0.55
+    if hi <= lo: hi = lo + max(1, safe_cur*0.5)
+    pts = [lo+(hi-lo)*i/240 for i in range(241)]
     pnls = [pnl_at(legs,p) for p in pts]
     maxV=max(pnls); minV=min(pnls)
-    W=380; H=230; pX=14; pTop=26; pBot=10; labelH=34
+    if metrics.get("max_profit") is not None: maxV = max(maxV, metrics["max_profit"])
+    if metrics.get("max_loss") is not None: minV = min(minV, -metrics["max_loss"])
+    W=380; H=250; pX=14; pTop=30; pBot=10; labelH=38
     plotH = H - pTop - pBot - labelH
-    vpad=(maxV-minV)*0.18; vTop=maxV+vpad; vBot=minV-vpad; vRange=(vTop-vBot) or 1
+    vpad=max((maxV-minV)*0.18, 50); vTop=maxV+vpad; vBot=minV-vpad; vRange=(vTop-vBot) or 1
     def cx(p): return pX+((p-lo)/(hi-lo))*(W-2*pX)
     def cy(v): return pTop+(vTop-v)/vRange*plotH
     zY=cy(0)
     lineD=" ".join(f"{'M' if i==0 else 'L'}{cx(pts[i]):.1f},{cy(pnls[i]):.1f}" for i in range(len(pts)))
     fillD=f"{lineD} L{cx(hi):.1f},{zY:.1f} L{cx(lo):.1f},{zY:.1f} Z"
-    # ticks
     ticks=""
     for i in range(6):
         p=lo+(hi-lo)*i/5; tx=cx(p)
-        ticks+=f'<line x1="{tx:.1f}" y1="{zY:.1f}" x2="{tx:.1f}" y2="{zY+4:.1f}" stroke="#444" stroke-width="0.8"/><text x="{tx:.1f}" y="{zY+13:.1f}" fill="#444" font-size="7.5" text-anchor="middle">${p:.0f}</text>'
-    # current price
-    cur_svg=""
-    if lo<safe_cur<hi:
-        cur_svg=f'<text x="{cx(safe_cur):.1f}" y="17" fill="#3B82F6" font-size="9" text-anchor="middle" font-weight="600">現價 ${safe_cur}</text>'
-    # strike dots
+        ticks+=f'<line x1="{tx:.1f}" y1="{zY:.1f}" x2="{tx:.1f}" y2="{zY+4:.1f}" stroke="#444" stroke-width="0.8"/><text x="{tx:.1f}" y="{zY+14:.1f}" fill="#555" font-size="7.5" text-anchor="middle">${p:.0f}</text>'
+    guide_svg=""
+    def guide(price, color, label, yoff=0):
+        if price is None or not (lo < price < hi): return ""
+        x=cx(price)
+        return f'<line x1="{x:.1f}" y1="{pTop}" x2="{x:.1f}" y2="{pTop+plotH}" stroke="{color}" stroke-width="1.2" stroke-dasharray="5 4" opacity=".95"/><rect x="{x-32:.1f}" y="{8+yoff:.1f}" width="64" height="15" rx="4" fill="#0D0D0D" opacity="0.94"/><text x="{x:.1f}" y="{19+yoff:.1f}" fill="{color}" font-size="8.5" text-anchor="middle" font-weight="800">{label}</text>'
+    guide_svg += guide(safe_cur, "#3B82F6", f"現價 ${safe_cur:.0f}", 0)
+    guide_svg += guide(be, "#F0B429", f"BE ${be:.1f}" if be else "", 17)
     stk_svg=""
     for leg_k,leg_v in legs.items():
         sk=leg_v["strike"]
         if not (lo<sk<hi): continue
         dy=cy(pnl_at(legs,sk)); sx=cx(sk)
         mc="#60A5FA" if "buy" in leg_k else "#FB923C"
-        lbl=f"{'買入' if 'buy' in leg_k else '賣出'} ${sk}"
+        lbl=f"{'買' if 'buy' in leg_k else '賣'} ${sk:g}"
+        stk_svg += f'<line x1="{sx:.1f}" y1="{pTop}" x2="{sx:.1f}" y2="{pTop+plotH}" stroke="{mc}" stroke-width="1" stroke-dasharray="3 4" opacity=".65"/>'
         above=dy>H*0.45; by2=dy-27 if above else dy+11
-        stk_svg+=f'<rect x="{sx-32:.1f}" y="{by2:.1f}" width="64" height="14" rx="3" fill="#0D0D0D" opacity="0.92"/><text x="{sx:.1f}" y="{by2+11:.1f}" fill="{mc}" font-size="9" text-anchor="middle" font-weight="700">{lbl}</text><circle cx="{sx:.1f}" cy="{dy:.1f}" r="5" fill="{mc}"/><circle cx="{sx:.1f}" cy="{dy:.1f}" r="9" fill="{mc}" opacity="0.18"/>'
-    # BE dot
-    be_svg=""
-    if be and lo<be<hi:
-        bx=cx(be)
-        be_svg=f'<rect x="{bx-34:.1f}" y="{zY-31:.1f}" width="68" height="23" rx="4" fill="#0D0D0D" opacity="0.92"/><text x="{bx:.1f}" y="{zY-19:.1f}" fill="#F0B429" font-size="8" text-anchor="middle" font-weight="600">損益平衡</text><text x="{bx:.1f}" y="{zY-8:.1f}" fill="#F0B429" font-size="10" text-anchor="middle" font-weight="800">${be:.2f}</text><circle cx="{bx:.1f}" cy="{zY:.1f}" r="5" fill="#F0B429"/><circle cx="{bx:.1f}" cy="{zY:.1f}" r="9" fill="#F0B429" opacity="0.22"/>'
-    # bottom labels — profit/loss on correct sides
-    bY=H-labelH+16; bY2=H-labelH+28
+        stk_svg+=f'<rect x="{sx-28:.1f}" y="{by2:.1f}" width="56" height="14" rx="3" fill="#0D0D0D" opacity="0.92"/><text x="{sx:.1f}" y="{by2+11:.1f}" fill="{mc}" font-size="8.5" text-anchor="middle" font-weight="700">{lbl}</text><circle cx="{sx:.1f}" cy="{dy:.1f}" r="4.5" fill="{mc}"/><circle cx="{sx:.1f}" cy="{dy:.1f}" r="8" fill="{mc}" opacity="0.18"/>'
+    bY=H-labelH+16; bY2=H-labelH+30
     pX1=W-pX-4; pA1="end"; lX1=pX+4; lA1="start"
     if not profit_right: pX1,pA1,lX1,lA1=pX+4,"start",W-pX-4,"end"
-    mp_txt="∞" if unlimited else f"+${maxV:.0f}"
-    bot=f'<text x="{pX1}" y="{bY}" fill="#4ADE80" font-size="8" font-weight="700" text-anchor="{pA1}">最大獲利</text><text x="{pX1}" y="{bY2}" fill="#4ADE80" font-size="12" font-weight="800" text-anchor="{pA1}">{mp_txt}</text><text x="{lX1}" y="{bY}" fill="#F87171" font-size="8" font-weight="700" text-anchor="{lA1}">最大虧損</text><text x="{lX1}" y="{bY2}" fill="#F87171" font-size="12" font-weight="800" text-anchor="{lA1}">${minV:.0f}</text>'
-    return f'''<svg viewBox="0 0 {W} {H}" style="width:100%;height:{H}px;display:block;background:#141414;border-radius:14px;margin-top:8px">
+    mp_txt="無限 ∞" if unlimited else f"+${metrics.get('max_profit', maxV):.0f}"
+    ml_txt=f"-${metrics.get('max_loss', abs(minV)):.0f}"
+    bot=f'<text x="{pX1}" y="{bY}" fill="#4ADE80" font-size="8" font-weight="700" text-anchor="{pA1}">最大獲利</text><text x="{pX1}" y="{bY2}" fill="#4ADE80" font-size="12" font-weight="800" text-anchor="{pA1}">{mp_txt}</text><text x="{lX1}" y="{bY}" fill="#F87171" font-size="8" font-weight="700" text-anchor="{lA1}">最大虧損</text><text x="{lX1}" y="{bY2}" fill="#F87171" font-size="12" font-weight="800" text-anchor="{lA1}">{ml_txt}</text>'
+    return f'''<svg viewBox="0 0 {W} {H}" style="width:100%;height:{H}px;display:block;background:#141414;border-radius:14px;margin-top:8px;border:1px solid #242424">
   <clipPath id="cpp"><rect x="{pX}" y="{pTop}" width="{W-2*pX}" height="{max(zY-pTop,0):.1f}"/></clipPath>
   <clipPath id="cpl"><rect x="{pX}" y="{zY:.1f}" width="{W-2*pX}" height="{max(plotH-(zY-pTop),0):.1f}"/></clipPath>
   <line x1="{pX}" y1="{zY:.1f}" x2="{W-pX}" y2="{zY:.1f}" stroke="#2A2A2A" stroke-width="1" stroke-dasharray="4 3"/>
-  {ticks}{cur_svg}
+  {ticks}{guide_svg}
   <path d="{fillD}" fill="#4ADE80" opacity="0.18" clip-path="url(#cpp)"/>
   <path d="{fillD}" fill="#F87171" opacity="0.18" clip-path="url(#cpl)"/>
   <path d="{lineD}" fill="none" stroke="#4ADE80" stroke-width="2.5" stroke-linejoin="round" clip-path="url(#cpp)"/>
   <path d="{lineD}" fill="none" stroke="#F87171" stroke-width="2.5" stroke-linejoin="round" clip-path="url(#cpl)"/>
-  {stk_svg}{be_svg}{bot}
+  {stk_svg}{bot}
 </svg>'''
+
 
 # ── Local storage / favorites ─────────────────────────
 if HAS_LS:
@@ -432,90 +504,91 @@ with tab1:
             if next_leg:
                 st.markdown(f'<div style="font-size:11px;color:{sc};font-weight:600;margin-bottom:6px">👇 點選「{LEG_LABEL[next_leg]}」的行權價</div>', unsafe_allow_html=True)
 
-            # Chain table — HTML display + selectbox to pick
-            is_call_leg = next_leg and "Call" in next_leg
-            is_put_leg  = next_leg and "Put"  in next_leg
-            is_buy = next_leg and next_leg.startswith("buy")
+            if next_leg:
+                # Chain table — HTML display + selectbox to pick
+                is_call_leg = next_leg and "Call" in next_leg
+                is_put_leg  = next_leg and "Put"  in next_leg
+                is_buy = next_leg and next_leg.startswith("buy")
 
-            rows_html=""
-            call_options=[]; put_options=[]
-            for row in chain_rows:
-                strike=row.get("strike",0)
-                atm=safe_cur and abs(strike-safe_cur)<1.5
-                call_p=row.get("callAsk" if is_buy else "callBid")
-                put_p=row.get("putAsk" if is_buy else "putBid")
-                call_val=f"${fmt(call_p)}" if call_p else "—"
-                put_val=f"${fmt(put_p)}" if put_p else "—"
-                sk_str=f"{strike:.0f}" if strike==int(strike) else str(strike)
-                sk_color="#3B82F6" if atm else "#F0F0F0"
-                row_bg="rgba(59,130,246,0.05)" if atm else "transparent"
+                rows_html=""
+                call_options=[]; put_options=[]
+                for row in chain_rows:
+                    strike=row.get("strike",0)
+                    atm=safe_cur and abs(strike-safe_cur)<1.5
+                    call_p=row.get("callAsk" if is_buy else "callBid")
+                    put_p=row.get("putAsk" if is_buy else "putBid")
+                    call_val=f"${fmt(call_p)}" if call_p else "—"
+                    put_val=f"${fmt(put_p)}" if put_p else "—"
+                    sk_str=f"{strike:.0f}" if strike==int(strike) else str(strike)
+                    sk_color="#3B82F6" if atm else "#F0F0F0"
+                    row_bg="rgba(59,130,246,0.05)" if atm else "transparent"
 
-                if is_call_leg and call_p:
-                    call_cell=f'<td style="padding:5px 6px;text-align:center"><div style="background:#22C55E18;border:1px solid #22C55E55;border-radius:6px;padding:4px 2px;font-size:12px;font-weight:700;color:#22C55E">{call_val}</div></td>'
-                    call_options.append((strike,call_p,call_val))
-                else:
-                    call_cell=f'<td style="padding:5px 6px;text-align:center;font-size:11px;color:#3A3A3A">{call_val}</td>'
+                    if is_call_leg and call_p:
+                        call_cell=f'<td style="padding:5px 6px;text-align:center"><div style="background:#22C55E18;border:1px solid #22C55E55;border-radius:6px;padding:4px 2px;font-size:12px;font-weight:700;color:#22C55E">{call_val}</div></td>'
+                        call_options.append((strike,call_p,call_val))
+                    else:
+                        call_cell=f'<td style="padding:5px 6px;text-align:center;font-size:11px;color:#3A3A3A">{call_val}</td>'
 
-                if is_put_leg and put_p:
-                    put_cell=f'<td style="padding:5px 6px;text-align:center"><div style="background:#EF444418;border:1px solid #EF444455;border-radius:6px;padding:4px 2px;font-size:12px;font-weight:700;color:#EF4444">{put_val}</div></td>'
-                    put_options.append((strike,put_p,put_val))
-                else:
-                    put_cell=f'<td style="padding:5px 6px;text-align:center;font-size:11px;color:#3A3A3A">{put_val}</td>'
+                    if is_put_leg and put_p:
+                        put_cell=f'<td style="padding:5px 6px;text-align:center"><div style="background:#EF444418;border:1px solid #EF444455;border-radius:6px;padding:4px 2px;font-size:12px;font-weight:700;color:#EF4444">{put_val}</div></td>'
+                        put_options.append((strike,put_p,put_val))
+                    else:
+                        put_cell=f'<td style="padding:5px 6px;text-align:center;font-size:11px;color:#3A3A3A">{put_val}</td>'
 
-                rows_html+=f'<tr style="background:{row_bg};border-bottom:1px solid #161616">{call_cell}<td style="padding:5px 4px;text-align:center;font-size:13px;font-weight:800;color:{sk_color}">{sk_str}</td>{put_cell}</tr>'
+                    rows_html+=f'<tr style="background:{row_bg};border-bottom:1px solid #161616">{call_cell}<td style="padding:5px 4px;text-align:center;font-size:13px;font-weight:800;color:{sk_color}">{sk_str}</td>{put_cell}</tr>'
 
-            st.markdown(f'''<div style="background:#1C1C1C;border-radius:12px;overflow:hidden;margin-bottom:10px">
-              <table style="width:100%;border-collapse:collapse">
-                <thead><tr style="background:#242424">
-                  <th style="padding:7px;text-align:center;font-size:10px;color:#22C55E;font-weight:700;letter-spacing:0.5px">CALL</th>
-                  <th style="padding:7px;text-align:center;font-size:10px;color:#555;font-weight:700">行權價</th>
-                  <th style="padding:7px;text-align:center;font-size:10px;color:#EF4444;font-weight:700;letter-spacing:0.5px">PUT</th>
-                </tr></thead><tbody>{rows_html}</tbody></table></div>''', unsafe_allow_html=True)
+                st.markdown(f'''<div style="background:#1C1C1C;border-radius:12px;overflow:hidden;margin-bottom:10px">
+                  <table style="width:100%;border-collapse:collapse">
+                    <thead><tr style="background:#242424">
+                      <th style="padding:7px;text-align:center;font-size:10px;color:#22C55E;font-weight:700;letter-spacing:0.5px">CALL</th>
+                      <th style="padding:7px;text-align:center;font-size:10px;color:#555;font-weight:700">行權價</th>
+                      <th style="padding:7px;text-align:center;font-size:10px;color:#EF4444;font-weight:700;letter-spacing:0.5px">PUT</th>
+                    </tr></thead><tbody>{rows_html}</tbody></table></div>''', unsafe_allow_html=True)
 
-            # Pick from highlighted options
-            if next_leg and (call_options or put_options):
-                opts = call_options if is_call_leg else put_options
-                if opts:
-                    idx = st.selectbox(
-                        f"選擇 {LEG_LABEL[next_leg]}",
-                        range(len(opts)),
-                        format_func=lambda i: f"行權價 ${opts[i][0]}  ·  ${fmt(opts[i][1])}",
-                        key=f"pick_{next_leg}"
-                    )
-                    if st.button(f"✓ 確認 {LEG_LABEL[next_leg]}", key=f"confirm_{next_leg}"):
-                        s,p,_ = opts[idx]
-                        st.session_state["chain_legs"][next_leg]={"strike":s,"prem":p}
-                        st.rerun()
+                # Pick from highlighted options
+                if next_leg and (call_options or put_options):
+                    opts = call_options if is_call_leg else put_options
+                    if opts:
+                        idx = st.selectbox(
+                            f"選擇 {LEG_LABEL[next_leg]}",
+                            range(len(opts)),
+                            format_func=lambda i: f"行權價 ${opts[i][0]}  ·  ${fmt(opts[i][1])}",
+                            key=f"pick_{next_leg}"
+                        )
+                        if st.button(f"✓ 確認 {LEG_LABEL[next_leg]}", key=f"confirm_{next_leg}"):
+                            s,p,_ = opts[idx]
+                            st.session_state["chain_legs"][next_leg]={"strike":s,"prem":p}
+                            st.rerun()
 
             # Show result
             if all(n in cur_legs for n in needs):
                 legs = cur_legs
                 be=find_be(legs,safe_cur)
-                pnls_all=[pnl_at(legs,safe_cur+(hi-lo)*i/200) for i in range(201)
-                          for lo,hi in [(min([l["strike"] for l in legs.values()]+[safe_cur])*0.8,
-                                         max([l["strike"] for l in legs.values()]+[safe_cur])*1.3)]]
-                maxP=max(pnl_at(legs,p) for p in [safe_cur+i for i in range(-100,300,5)])
-                minP=min(pnl_at(legs,p) for p in [safe_cur+i for i in range(-100,300,5)])
-                cost=abs(minP); unlimited=cur_strat in ("call","put")
-                mp_label="無限 ∞" if unlimited else f"+${fmtm(maxP)}"
+                metrics = analyze_legs(legs, cur_strat)
+                maxP = metrics.get("max_profit")
+                cost = metrics.get("max_loss", 0)
+                unlimited = metrics.get("unlimited", False)
+                mp_label = "無限 ∞" if unlimited else f"+${fmtm(maxP)}"
+                ror_label = "—" if unlimited or not cost else f"{(maxP / cost * 100):.0f}%"
                 st.divider()
                 st.markdown(f'''<div style="display:flex;gap:6px;margin-bottom:10px">
-                  <div style="flex:1;background:#141414;border-radius:10px;padding:10px 4px;text-align:center">
+                  <div style="flex:1;background:#141414;border:1px solid #242424;border-radius:10px;padding:10px 4px;text-align:center">
                     <div style="font-size:9px;color:#555;font-weight:700;margin-bottom:2px">最大獲利</div>
                     <div style="font-size:14px;font-weight:700;color:#22C55E">{mp_label}</div></div>
-                  <div style="flex:1;background:#141414;border-radius:10px;padding:10px 4px;text-align:center">
+                  <div style="flex:1;background:#141414;border:1px solid #242424;border-radius:10px;padding:10px 4px;text-align:center">
                     <div style="font-size:9px;color:#555;font-weight:700;margin-bottom:2px">最大虧損</div>
                     <div style="font-size:14px;font-weight:700;color:#EF4444">-${fmtm(cost)}</div></div>
-                  <div style="flex:1;background:#141414;border-radius:10px;padding:10px 4px;text-align:center">
+                  <div style="flex:1;background:#141414;border:1px solid #242424;border-radius:10px;padding:10px 4px;text-align:center">
                     <div style="font-size:9px;color:#F59E0B;font-weight:700;margin-bottom:2px">損益平衡</div>
                     <div style="font-size:14px;font-weight:700;color:#F59E0B">${fmt(be) if be else "—"}</div></div>
-                  <div style="flex:1;background:#141414;border-radius:10px;padding:10px 4px;text-align:center">
-                    <div style="font-size:9px;color:#555;font-weight:700;margin-bottom:2px">成本</div>
-                    <div style="font-size:14px;font-weight:700;color:#F0F0F0">${fmtm(cost)}</div></div>
+                  <div style="flex:1;background:#141414;border:1px solid #242424;border-radius:10px;padding:10px 4px;text-align:center">
+                    <div style="font-size:9px;color:#555;font-weight:700;margin-bottom:2px">報酬率</div>
+                    <div style="font-size:14px;font-weight:700;color:#F0F0F0">{ror_label}</div></div>
                 </div>''', unsafe_allow_html=True)
                 st.markdown(make_svg(legs, safe_cur, cur_strat), unsafe_allow_html=True)
+                st.markdown(pnl_table_html(legs, safe_cur, cost), unsafe_allow_html=True)
                 if st.button("⭐ 收藏這個組合", key="chain_save"):
-                    combo={"type":cur_strat,"ticker":chain_ticker,"currentPrice":safe_cur,"expiry":selected_expiry,"breakeven":round(be,2) if be else None,"maxLoss":round(cost),"maxProfit":None if unlimited else round(maxP)}
+                    combo={"type":cur_strat,"ticker":chain_ticker,"currentPrice":safe_cur,"expiry":selected_expiry,"breakeven":round(be,2) if be else None,"maxLoss":round(cost),"maxProfit":None if unlimited else round(maxP or 0)}
                     for k,v in legs.items():
                         if k=="buyCall": combo["buyStrike"]=v["strike"]; combo["buyPremium"]=v["prem"]
                         if k=="sellCall": combo["sellStrike"]=v["strike"]; combo["sellPremium"]=v["prem"]
