@@ -536,45 +536,57 @@ with tab1:
                 "call":"直接買入Call，無限獲利潛力，最多虧損全部權利金。",
                 "put": "直接買入Put，跌越多賺越多，最多虧損全部權利金。",
             }
-            c1,c2 = st.columns([3,1])
+            c1,c2 = st.columns([4,1])
             sk_label = c1.selectbox("策略選擇", list(STRAT_LABELS.values()), key="sk_sel", label_visibility="collapsed")
             sk = [k for k,v in STRAT_LABELS.items() if v==sk_label][0]
-            show_tip = c2.button("ⓘ 說明", key="tip_btn")
-            if show_tip:
-                st.info(STRAT_TIPS[sk])
+            # small tip toggle
+            if "show_tip" not in st.session_state: st.session_state["show_tip"] = False
+            if c2.button("ⓘ", key="tip_btn"):
+                st.session_state["show_tip"] = not st.session_state["show_tip"]
+            if st.session_state.get("show_tip"):
+                st.markdown(f'<div style="background:#0C2D6B;border:1px solid #1F6FEB;border-radius:10px;padding:10px 14px;margin-bottom:10px;font-size:12px;color:#8B949E;line-height:1.6">{STRAT_TIPS[sk]}</div>', unsafe_allow_html=True)
 
-            arr_b = calls if sk in ("bull","call") else puts
-            arr_s = calls if sk == "bull" else puts if sk == "bear" else []
-            opts_b = {f"${r['k']:.0f}  (Ask ${r['ask']:.2f})": r for r in arr_b}
-            opts_s = {f"${r['k']:.0f}  (Bid ${r['bid']:.2f})": r for r in arr_s} if arr_s else {}
+            # Filter: only show strikes within ±30% of current price
+            arr_b_all = calls if sk in ("bull","call") else puts
+            arr_s_all = calls if sk == "bull" else puts if sk == "bear" else []
+            arr_b = [r for r in arr_b_all if 0.70*cur <= r["k"] <= 1.30*cur]
+            arr_s = [r for r in arr_s_all if 0.70*cur <= r["k"] <= 1.30*cur]
+            # Sort by closeness to current price first for UX
+            arr_b.sort(key=lambda r: abs(r["k"]-cur))
+            arr_s.sort(key=lambda r: abs(r["k"]-cur))
+            opts_b = {f"${r['k']:.0f}  (Ask ${r['ask']:.2f})": r for r in sorted(arr_b, key=lambda r: r["k"])}
+            opts_s = {f"${r['k']:.0f}  (Bid ${r['bid']:.2f})": r for r in sorted(arr_s, key=lambda r: r["k"])} if arr_s else {}
 
             if sk in ("bull","bear"):
-                c1, c2 = st.columns(2)
                 b_lbl = "買入 Call" if sk=="bull" else "買入 Put"
                 s_lbl = "賣出 Call" if sk=="bull" else "賣出 Put"
+                c1, c2 = st.columns(2)
                 with c1:
-                    st.markdown(f'<div style="background:#0C2D6B;border:1.5px solid #1F6FEB;border-radius:14px;padding:12px;margin-bottom:10px"><div style="font-size:11px;font-weight:700;color:#1F6FEB;margin-bottom:8px">{b_lbl} (Long)</div>', unsafe_allow_html=True)
-                    sel_b = st.selectbox("買入行權價", ["點此選擇"]+list(opts_b.keys()), key="sel_b", label_visibility="collapsed")
-                    if sel_b != "點此選擇":
-                        r = opts_b[sel_b]
-                        st.markdown(f'<div style="font-size:10px;color:#8B949E;margin-bottom:2px">Ask 權利金</div><div style="font-size:20px;font-weight:800">${r["ask"]:.2f}</div>', unsafe_allow_html=True)
+                    st.markdown(f'''<div style="background:#0C2D6B;border:1.5px solid #1F6FEB;border-radius:14px;padding:12px;margin-bottom:10px">
+                      <div style="font-size:11px;font-weight:700;color:#1F6FEB;margin-bottom:8px">{b_lbl} (Long)</div>''', unsafe_allow_html=True)
+                    sel_b = st.selectbox("買入", ["請選擇"]+list(opts_b.keys()), key="sel_b", label_visibility="collapsed")
+                    bR = opts_b.get(sel_b)
+                    if bR:
+                        st.markdown(f'<div style="font-size:10px;color:#8B949E;margin:4px 0 2px">Ask 權利金</div><div style="font-size:22px;font-weight:900;color:#E6EDF3">${bR["ask"]:.2f}</div>', unsafe_allow_html=True)
                     st.markdown('</div>', unsafe_allow_html=True)
                 with c2:
-                    st.markdown(f'<div style="background:#0D4429;border:1.5px solid #1A6B36;border-radius:14px;padding:12px;margin-bottom:10px"><div style="font-size:11px;font-weight:700;color:#3FB950;margin-bottom:8px">{s_lbl} (Short)</div>', unsafe_allow_html=True)
-                    sel_s = st.selectbox("賣出行權價", ["點此選擇"]+list(opts_s.keys()), key="sel_s", label_visibility="collapsed")
-                    if sel_s != "點此選擇":
-                        r = opts_s[sel_s]
-                        st.markdown(f'<div style="font-size:10px;color:#8B949E;margin-bottom:2px">Bid 權利金</div><div style="font-size:20px;font-weight:800">${r["bid"]:.2f}</div>', unsafe_allow_html=True)
+                    st.markdown(f'''<div style="background:#0D4429;border:1.5px solid #1A6B36;border-radius:14px;padding:12px;margin-bottom:10px">
+                      <div style="font-size:11px;font-weight:700;color:#3FB950;margin-bottom:8px">{s_lbl} (Short)</div>''', unsafe_allow_html=True)
+                    sel_s = st.selectbox("賣出", ["請選擇"]+list(opts_s.keys()), key="sel_s", label_visibility="collapsed")
+                    sR = opts_s.get(sel_s)
+                    if sR:
+                        st.markdown(f'<div style="font-size:10px;color:#8B949E;margin:4px 0 2px">Bid 權利金</div><div style="font-size:22px;font-weight:900;color:#E6EDF3">${sR["bid"]:.2f}</div>', unsafe_allow_html=True)
                     st.markdown('</div>', unsafe_allow_html=True)
             else:
                 b_lbl = "買入 Call" if sk=="call" else "買入 Put"
-                st.markdown(f'<div style="background:#0C2D6B;border:1.5px solid #1F6FEB;border-radius:14px;padding:12px;margin-bottom:10px"><div style="font-size:11px;font-weight:700;color:#1F6FEB;margin-bottom:8px">{b_lbl} (Long)</div>', unsafe_allow_html=True)
-                sel_b = st.selectbox("行權價", ["點此選擇"]+list(opts_b.keys()), key="sel_b2", label_visibility="collapsed")
-                if sel_b != "點此選擇":
-                    r = opts_b[sel_b]
-                    st.markdown(f'<div style="font-size:10px;color:#8B949E;margin-bottom:2px">Ask 權利金</div><div style="font-size:20px;font-weight:800">${r["ask"]:.2f}</div>', unsafe_allow_html=True)
+                st.markdown(f'''<div style="background:#0C2D6B;border:1.5px solid #1F6FEB;border-radius:14px;padding:12px;margin-bottom:10px">
+                  <div style="font-size:11px;font-weight:700;color:#1F6FEB;margin-bottom:8px">{b_lbl} (Long)</div>''', unsafe_allow_html=True)
+                sel_b = st.selectbox("行權價", ["請選擇"]+list(opts_b.keys()), key="sel_b2", label_visibility="collapsed")
+                bR = opts_b.get(sel_b)
+                if bR:
+                    st.markdown(f'<div style="font-size:10px;color:#8B949E;margin:4px 0 2px">Ask 權利金</div><div style="font-size:22px;font-weight:900;color:#E6EDF3">${bR["ask"]:.2f}</div>', unsafe_allow_html=True)
                 st.markdown('</div>', unsafe_allow_html=True)
-                sel_s = "點此選擇"
+                sel_s = "請選擇"; sR = None
 
             # Calculate button
             st.markdown('''<style>
@@ -584,12 +596,12 @@ with tab1:
             </style>''', unsafe_allow_html=True)
             if st.button("計算損益", key="calc_btn"):
                 b_sel = "sel_b" if sk in ("bull","bear") else "sel_b2"
-                sel_b_val = st.session_state.get(b_sel, "點此選擇")
-                sel_s_val = st.session_state.get("sel_s", "點此選擇") if sk in ("bull","bear") else "點此選擇"
+                sel_b_val = st.session_state.get(b_sel, "請選擇")
+                sel_s_val = st.session_state.get("sel_s", "請選擇") if sk in ("bull","bear") else "請選擇"
 
-                if sel_b_val == "點此選擇":
+                if sel_b_val == "請選擇" or sel_b_val not in opts_b:
                     st.error("請選擇買入行權價")
-                elif sk in ("bull","bear") and sel_s_val == "點此選擇":
+                elif sk in ("bull","bear") and (sel_s_val == "請選擇" or sel_s_val not in opts_s):
                     st.error("請選擇賣出行權價")
                 else:
                     bR = opts_b[sel_b_val]
