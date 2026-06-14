@@ -420,52 +420,61 @@ with tab1:
 
     if calls_d or puts_d:
         cur=info.get("price",0)
-        calls_f=[r for r in calls_d if cur*0.7<=r["k"]<=cur*1.3]
-        puts_f=[r for r in puts_d if cur*0.7<=r["k"]<=cur*1.3]
+        # Filter: ±25% of current price, sorted by proximity
+        if cur>0:
+            calls_f=sorted([r for r in calls_d if cur*0.75<=r["k"]<=cur*1.25],key=lambda r:r["k"])
+            puts_f=sorted([r for r in puts_d if cur*0.75<=r["k"]<=cur*1.25],key=lambda r:r["k"])
+        else:
+            calls_f=calls_d[:20]; puts_f=puts_d[:20]
 
         STRAT_MAP={"看漲價差 Bull Call Spread":"bull","看跌價差 Bear Put Spread":"bear","單買 Call":"call","單買 Put":"put"}
         TIPS={"bull":"買低Call賣高Call，看漲限風險，最大獲利固定。","bear":"買高Put賣低Put，看跌限風險，最大獲利固定。","call":"直接買入Call，無限獲利潛力，最多虧損全部權利金。","put":"直接買入Put，跌越多賺越多，最多虧損全部權利金。"}
 
-        sc1,sc2=st.columns([4,1])
-        sk_lbl=sc1.selectbox("策略",list(STRAT_MAP.keys()),key="sk",label_visibility="collapsed")
+        # Strategy selector + tip inline
+        sk_lbl=st.selectbox("策略",list(STRAT_MAP.keys()),key="sk",label_visibility="collapsed")
         sk=STRAT_MAP[sk_lbl]
-        if sc2.button("ⓘ",key="tip"):
-            st.info(TIPS[sk])
+
+        # Tip toggle
+        if "show_tip" not in st.session_state: st.session_state["show_tip"]=False
+        tip_cols=st.columns([5,1])
+        with tip_cols[1]:
+            st.markdown(f'''<div style="text-align:right;margin-top:-10px">
+              <span onclick="void(0)" style="background:#0C2D6B;border:1px solid #1F6FEB;border-radius:8px;padding:5px 10px;color:#1F6FEB;font-size:11px;font-weight:600;cursor:pointer;display:inline-block">ⓘ</span>
+            </div>''',unsafe_allow_html=True)
+        if st.session_state.get("show_tip"):
+            st.markdown(f'<div style="background:#0C2D6B;border:1px solid #1F6FEB;border-radius:10px;padding:10px 14px;margin-bottom:8px;font-size:12px;color:#8B949E">{TIPS[sk]}</div>',unsafe_allow_html=True)
 
         arr_b=calls_f if sk in("bull","call") else puts_f
         arr_s=calls_f if sk=="bull" else puts_f if sk=="bear" else[]
-        opts_b={f"${r['k']:.0f} · Ask ${r['ask']:.2f}":r for r in sorted(arr_b,key=lambda r:r["k"])}
-        opts_s={f"${r['k']:.0f} · Bid ${r['bid']:.2f}":r for r in sorted(arr_s,key=lambda r:r["k"])} if arr_s else{}
+        opts_b={f"${r['k']:.0f} · Ask ${r['ask']:.2f}":r for r in arr_b}
+        opts_s={f"${r['k']:.0f} · Bid ${r['bid']:.2f}":r for r in arr_s} if arr_s else{}
 
-        # Leg cards using HTML table for side-by-side on mobile
+        # Leg UI — colored expanders to simulate cards
         if sk in("bull","bear"):
             b_lbl="買入 Call"if sk=="bull"else"買入 Put"
             s_lbl="賣出 Call"if sk=="bull"else"賣出 Put"
-            st.markdown(f'''<table style="width:100%;border-collapse:separate;border-spacing:8px 0;margin:8px -8px;width:calc(100% + 16px)">
-              <tr>
-                <td style="background:#0C2D6B;border:1.5px solid #1F6FEB;border-radius:14px;padding:12px;width:50%;vertical-align:top">
-                  <div style="font-size:11px;font-weight:700;color:#1F6FEB;margin-bottom:8px">{b_lbl} (Long)</div>
-                </td>
-                <td style="background:#0D4429;border:1.5px solid #1A6B36;border-radius:14px;padding:12px;width:50%;vertical-align:top">
-                  <div style="font-size:11px;font-weight:700;color:#3FB950;margin-bottom:8px">{s_lbl} (Short)</div>
-                </td>
-              </tr>
-            </table>''',unsafe_allow_html=True)
-            c1,c2=st.columns(2)
-            with c1:
-                sel_b=st.selectbox("買入",["請選擇"]+list(opts_b.keys()),key="selb",label_visibility="collapsed")
-                bR=opts_b.get(sel_b)
-                if bR: st.markdown(f'<div style="font-size:10px;color:#8B949E">Ask 權利金</div><div style="font-size:22px;font-weight:900">${bR["ask"]:.2f}</div>',unsafe_allow_html=True)
-            with c2:
-                sel_s=st.selectbox("賣出",["請選擇"]+list(opts_s.keys()),key="sels",label_visibility="collapsed")
-                sR=opts_s.get(sel_s)
-                if sR: st.markdown(f'<div style="font-size:10px;color:#8B949E">Bid 權利金</div><div style="font-size:22px;font-weight:900">${sR["bid"]:.2f}</div>',unsafe_allow_html=True)
+            # Blue card: buy leg
+            st.markdown(f'<div style="background:#0C2D6B;border:1.5px solid #1F6FEB;border-radius:14px;padding:12px 14px;margin:8px 0 4px"><div style="font-size:11px;font-weight:700;color:#1F6FEB;margin-bottom:8px">{b_lbl} (Long)</div></div>',unsafe_allow_html=True)
+            sel_b=st.selectbox("買入",["請選擇"]+list(opts_b.keys()),key="selb",label_visibility="collapsed")
+            bR=opts_b.get(sel_b)
+            if bR:
+                st.markdown(f'<div style="background:#0C2D6B;border-radius:0 0 10px 10px;padding:2px 14px 10px;margin-top:-8px;margin-bottom:8px"><div style="font-size:10px;color:#60A5FA;margin-bottom:2px">Ask 權利金</div><div style="font-size:24px;font-weight:900;color:#E6EDF3">${bR["ask"]:.2f}</div></div>',unsafe_allow_html=True)
+            # Green card: sell leg
+            st.markdown(f'<div style="background:#0D4429;border:1.5px solid #1A6B36;border-radius:14px;padding:12px 14px;margin:8px 0 4px"><div style="font-size:11px;font-weight:700;color:#3FB950;margin-bottom:8px">{s_lbl} (Short)</div></div>',unsafe_allow_html=True)
+            sel_s=st.selectbox("賣出",["請選擇"]+list(opts_s.keys()),key="sels",label_visibility="collapsed")
+            sR=opts_s.get(sel_s)
+            if sR:
+                st.markdown(f'<div style="background:#0D4429;border-radius:0 0 10px 10px;padding:2px 14px 10px;margin-top:-8px;margin-bottom:8px"><div style="font-size:10px;color:#4ADE80;margin-bottom:2px">Bid 權利金</div><div style="font-size:24px;font-weight:900;color:#E6EDF3">${sR["bid"]:.2f}</div></div>',unsafe_allow_html=True)
         else:
             b_lbl="買入 Call"if sk=="call"else"買入 Put"
-            st.markdown(f'<div style="background:#0C2D6B;border:1.5px solid #1F6FEB;border-radius:14px;padding:12px;margin-bottom:10px"><div style="font-size:11px;font-weight:700;color:#1F6FEB;margin-bottom:8px">{b_lbl} (Long)</div></div>',unsafe_allow_html=True)
+            bc="#1F6FEB"if sk=="call"else"#F79000"
+            bbg="#0C2D6B"if sk=="call"else"#3D2400"
+            bbd="#1F6FEB"if sk=="call"else"#F79000"
+            st.markdown(f'<div style="background:{bbg};border:1.5px solid {bbd};border-radius:14px;padding:12px 14px;margin:8px 0 4px"><div style="font-size:11px;font-weight:700;color:{bc};margin-bottom:8px">{b_lbl} (Long)</div></div>',unsafe_allow_html=True)
             sel_b=st.selectbox("行權價",["請選擇"]+list(opts_b.keys()),key="selb",label_visibility="collapsed")
             bR=opts_b.get(sel_b)
-            if bR: st.markdown(f'<div style="font-size:10px;color:#8B949E">Ask 權利金</div><div style="font-size:22px;font-weight:900">${bR["ask"]:.2f}</div>',unsafe_allow_html=True)
+            if bR:
+                st.markdown(f'<div style="background:{bbg};border-radius:0 0 10px 10px;padding:2px 14px 10px;margin-top:-8px;margin-bottom:8px"><div style="font-size:10px;color:{bc};margin-bottom:2px">Ask 權利金</div><div style="font-size:24px;font-weight:900;color:#E6EDF3">${bR["ask"]:.2f}</div></div>',unsafe_allow_html=True)
             sel_s="請選擇"; sR=None
 
         st.markdown("<br>",unsafe_allow_html=True)
