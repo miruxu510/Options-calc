@@ -552,13 +552,14 @@ with tab1:
             if "chain_strat" not in st.session_state: st.session_state["chain_strat"] = "bull"
             if "chain_legs" not in st.session_state: st.session_state["chain_legs"] = {}
 
-            c1,c2 = st.columns(2)
-            for i,lbl in enumerate(strat_labels):
-                col = c1 if i%2==0 else c2
-                sk = strat_map[lbl]
-                if col.button(lbl, key=f"stbtn_{sk}", use_container_width=True):
-                    st.session_state["chain_strat"] = sk
-                    st.session_state["chain_legs"] = {}
+            chosen_lbl = st.selectbox("策略", strat_labels, key="chain_strat_sel",
+                index=list(strat_map.values()).index(st.session_state["chain_strat"]),
+                label_visibility="collapsed")
+            new_sk = strat_map[chosen_lbl]
+            if new_sk != st.session_state["chain_strat"]:
+                st.session_state["chain_strat"] = new_sk
+                st.session_state["chain_legs"] = {}
+                st.rerun()
 
             cur_strat = st.session_state["chain_strat"]
             cur_legs  = st.session_state["chain_legs"]
@@ -636,8 +637,9 @@ with tab1:
                     if "sellPut"  in legs: v+=-max(legs["sellPut"]["strike"]-price,0)*100 + legs["sellPut"]["prem"]*100
                     return v
                 strikes_sel = [l["strike"] for l in legs.values()]
+                safe_cur = chain_cur if chain_cur and chain_cur>0 else strikes_sel[0]
                 # First pass: find breakeven using wide range
-                _lo0=min(strikes_sel+[chain_cur])*0.80; _hi0=max(strikes_sel+[chain_cur])*1.25
+                _lo0=min(strikes_sel+[safe_cur])*0.80; _hi0=max(strikes_sel+[safe_cur])*1.25
                 _pts0=[_lo0+(_hi0-_lo0)*i/400 for i in range(401)]
                 _pnls0=[pnl_at(p) for p in _pts0]
                 be=None
@@ -646,8 +648,8 @@ with tab1:
                         be=_pts0[i]; break
                 unlimited = len(needs)==1
                 # Build chart range: center around breakeven (or current price if no BE)
-                center = be if be else chain_cur
-                all_key = strikes_sel + [chain_cur] + ([be] if be else [])
+                center = be if be else safe_cur
+                all_key = strikes_sel + [safe_cur] + ([be] if be else [])
                 span = max(max(all_key)-min(all_key), chain_cur*0.15) * 1.4
                 lo = center - span*0.55
                 hi = center + span*0.55
