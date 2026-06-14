@@ -503,133 +503,474 @@ tab1, tab2, tab3, tab4 = st.tabs(["選股計算", "AI 掃描", "我的組合", "
 
 # ══════ TAB 1: 選股計算 ══════
 with tab1:
-    pad = "padding:0 16px"
-    st.markdown(f'<div style="{pad}">', unsafe_allow_html=True)
-    c1, c2 = st.columns([1,1])
-    ticker = c1.text_input("股票代號", placeholder="MU / ORCL / DKNG", key="tk").upper().strip()
+    import streamlit.components.v1 as components
+
+    # Watchlist quick select
+    WATCHLIST = ["MU","NVDA","ORCL","DKNG","AAPL","TSLA","AMZN","MSFT","IBIT","SRAD"]
+    btn_style = "background:#1C2128;border:1px solid #30363D;border-radius:100px;padding:4px 10px;color:#8B949E;font-size:12px;font-weight:600;margin:2px;cursor:pointer;display:inline-block"
+    wl_html = "".join([f'<span style="{btn_style}">{t}</span>' for t in WATCHLIST])
+    st.markdown(f'<div style="margin-bottom:8px">{wl_html}</div>', unsafe_allow_html=True)
+    st.caption("👆 快速選股（輸入或點上方代號）")
+
+    t1c1, t1c2 = st.columns([2,1])
+    ticker = t1c1.text_input("股票代號", placeholder="MU / ORCL / DKNG", key="tk").upper().strip()
     expiries = get_expiries(ticker) if ticker else []
-    expiry = c2.selectbox("到期日", expiries if expiries else ["—"], key="exp") if expiries else None
+    expiry = t1c2.selectbox("到期日", expiries if expiries else ["—"], key="exp") if expiries else None
 
     info = {}
+    calls_data, puts_data = [], []
     if ticker:
         info = get_stock_info(ticker)
-        if info.get("price"):
-            stock_card(info, ticker)
-        elif ticker:
-            st.info("載入中...")
+        if expiry and expiry != "—":
+            calls_data, puts_data = get_chain(ticker, expiry)
 
-    if ticker and expiry and expiry != "—" and info.get("price"):
-        calls, puts = get_chain(ticker, expiry)
-        if not calls and not puts:
-            st.error("抓不到期權鏈，請稍後再試")
+    if not ticker:
+        st.markdown('''<div style="background:#161B22;border:1px solid #30363D;border-radius:14px;padding:30px;text-align:center;color:#8B949E;font-size:13px;margin-top:8px">
+          輸入股票代號開始分析<br><span style="font-size:11px">例如 MU、ORCL、DKNG</span></div>''', unsafe_allow_html=True)
+    else:
+        cur = info.get("price", 0)
+        # Build JSON for component
+        import json as _json
+        stock_json = _json.dumps({
+            "ticker": ticker,
+            "name": info.get("name", ticker),
+            "exchange": info.get("exchange",""),
+            "sector": info.get("sector",""),
+            "price": info.get("price",0),
+            "change": info.get("change",0),
+            "changePct": info.get("changePct",0),
+            "target": info.get("target"),
+            "lo52": info.get("lo52"),
+            "hi52": info.get("hi52"),
+            "nextER": info.get("nextER","—"),
+        })
+        # Filter option chain to ±30% of current price
+        if cur and cur > 0:
+            calls_f = [r for r in calls_data if 0.70*cur <= r["k"] <= 1.30*cur]
+            puts_f  = [r for r in puts_data  if 0.70*cur <= r["k"] <= 1.30*cur]
         else:
-            cur = info["price"]
-            STRAT_LABELS = {
-                "bull":"看漲價差 Bull Call Spread",
-                "bear":"看跌價差 Bear Put Spread",
-                "call":"單買 Call (Long Call)",
-                "put": "單買 Put (Long Put)",
-            }
-            STRAT_TIPS = {
-                "bull":"買低Call賣高Call，看漲限風險，最大獲利固定。",
-                "bear":"買高Put賣低Put，看跌限風險，最大獲利固定。",
-                "call":"直接買入Call，無限獲利潛力，最多虧損全部權利金。",
-                "put": "直接買入Put，跌越多賺越多，最多虧損全部權利金。",
-            }
-            c1,c2 = st.columns([4,1])
-            sk_label = c1.selectbox("策略選擇", list(STRAT_LABELS.values()), key="sk_sel", label_visibility="collapsed")
-            sk = [k for k,v in STRAT_LABELS.items() if v==sk_label][0]
-            # small tip toggle
-            if "show_tip" not in st.session_state: st.session_state["show_tip"] = False
-            if c2.button("ⓘ", key="tip_btn"):
-                st.session_state["show_tip"] = not st.session_state["show_tip"]
-            if st.session_state.get("show_tip"):
-                st.markdown(f'<div style="background:#0C2D6B;border:1px solid #1F6FEB;border-radius:10px;padding:10px 14px;margin-bottom:10px;font-size:12px;color:#8B949E;line-height:1.6">{STRAT_TIPS[sk]}</div>', unsafe_allow_html=True)
+            calls_f = calls_data[:30]
+            puts_f  = puts_data[:30]
+        calls_json = _json.dumps(calls_f)
+        puts_json  = _json.dumps(puts_f)
 
-            # Filter: only show strikes within ±30% of current price
-            arr_b_all = calls if sk in ("bull","call") else puts
-            arr_s_all = calls if sk == "bull" else puts if sk == "bear" else []
-            arr_b = [r for r in arr_b_all if 0.70*cur <= r["k"] <= 1.30*cur]
-            arr_s = [r for r in arr_s_all if 0.70*cur <= r["k"] <= 1.30*cur]
-            # Sort by closeness to current price first for UX
-            arr_b.sort(key=lambda r: abs(r["k"]-cur))
-            arr_s.sort(key=lambda r: abs(r["k"]-cur))
-            opts_b = {f"${r['k']:.0f}  (Ask ${r['ask']:.2f})": r for r in sorted(arr_b, key=lambda r: r["k"])}
-            opts_s = {f"${r['k']:.0f}  (Bid ${r['bid']:.2f})": r for r in sorted(arr_s, key=lambda r: r["k"])} if arr_s else {}
+        html_component = f"""
+<!DOCTYPE html>
+<html>
+<head>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+* {{ box-sizing:border-box; margin:0; padding:0; font-family:Inter,-apple-system,sans-serif; }}
+body {{ background:#0D1117; color:#E6EDF3; padding:0 0 20px; }}
+select {{ -webkit-appearance:none; appearance:none; }}
+select:focus {{ outline:none; }}
 
-            if sk in ("bull","bear"):
-                b_lbl = "買入 Call" if sk=="bull" else "買入 Put"
-                s_lbl = "賣出 Call" if sk=="bull" else "賣出 Put"
-                c1, c2 = st.columns(2)
-                with c1:
-                    st.markdown(f'''<div style="background:#0C2D6B;border:1.5px solid #1F6FEB;border-radius:14px;padding:12px;margin-bottom:10px">
-                      <div style="font-size:11px;font-weight:700;color:#1F6FEB;margin-bottom:8px">{b_lbl} (Long)</div>''', unsafe_allow_html=True)
-                    sel_b = st.selectbox("買入", ["請選擇"]+list(opts_b.keys()), key="sel_b", label_visibility="collapsed")
-                    bR = opts_b.get(sel_b)
-                    if bR:
-                        st.markdown(f'<div style="font-size:10px;color:#8B949E;margin:4px 0 2px">Ask 權利金</div><div style="font-size:22px;font-weight:900;color:#E6EDF3">${bR["ask"]:.2f}</div>', unsafe_allow_html=True)
-                    st.markdown('</div>', unsafe_allow_html=True)
-                with c2:
-                    st.markdown(f'''<div style="background:#0D4429;border:1.5px solid #1A6B36;border-radius:14px;padding:12px;margin-bottom:10px">
-                      <div style="font-size:11px;font-weight:700;color:#3FB950;margin-bottom:8px">{s_lbl} (Short)</div>''', unsafe_allow_html=True)
-                    sel_s = st.selectbox("賣出", ["請選擇"]+list(opts_s.keys()), key="sel_s", label_visibility="collapsed")
-                    sR = opts_s.get(sel_s)
-                    if sR:
-                        st.markdown(f'<div style="font-size:10px;color:#8B949E;margin:4px 0 2px">Bid 權利金</div><div style="font-size:22px;font-weight:900;color:#E6EDF3">${sR["bid"]:.2f}</div>', unsafe_allow_html=True)
-                    st.markdown('</div>', unsafe_allow_html=True)
-            else:
-                b_lbl = "買入 Call" if sk=="call" else "買入 Put"
-                st.markdown(f'''<div style="background:#0C2D6B;border:1.5px solid #1F6FEB;border-radius:14px;padding:12px;margin-bottom:10px">
-                  <div style="font-size:11px;font-weight:700;color:#1F6FEB;margin-bottom:8px">{b_lbl} (Long)</div>''', unsafe_allow_html=True)
-                sel_b = st.selectbox("行權價", ["請選擇"]+list(opts_b.keys()), key="sel_b2", label_visibility="collapsed")
-                bR = opts_b.get(sel_b)
-                if bR:
-                    st.markdown(f'<div style="font-size:10px;color:#8B949E;margin:4px 0 2px">Ask 權利金</div><div style="font-size:22px;font-weight:900;color:#E6EDF3">${bR["ask"]:.2f}</div>', unsafe_allow_html=True)
-                st.markdown('</div>', unsafe_allow_html=True)
-                sel_s = "請選擇"; sR = None
+.stock-card {{ background:#161B22; border:1px solid #30363D; border-radius:14px; padding:14px; margin-bottom:12px; }}
+.stock-header {{ display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:10px; }}
+.stock-logo {{ width:40px; height:40px; background:#1F6FEB; border-radius:9px; display:flex; align-items:center; justify-content:center; font-size:12px; font-weight:800; color:#fff; flex-shrink:0; }}
+.stock-name {{ font-size:13px; font-weight:700; }}
+.stock-badges {{ display:flex; gap:5px; margin-top:3px; flex-wrap:wrap; }}
+.badge {{ font-size:10px; background:#21262D; color:#8B949E; padding:2px 6px; border-radius:4px; }}
+.stock-price {{ text-align:right; }}
+.price-big {{ font-size:22px; font-weight:900; letter-spacing:-0.5px; }}
+.price-chg {{ font-size:12px; font-weight:600; }}
+.info-grid {{ display:grid; grid-template-columns:1fr 1fr; gap:6px; }}
+.info-cell {{ background:#1C2128; border-radius:9px; padding:7px 10px; display:flex; justify-content:space-between; align-items:center; }}
+.info-label {{ font-size:10px; color:#8B949E; font-weight:600; }}
+.info-val {{ font-size:11px; font-weight:700; text-align:right; }}
+.bar-wrap {{ background:#21262D; border-radius:100px; height:3px; margin-top:3px; width:56px; position:relative; margin-left:auto; }}
+.bar-dot {{ position:absolute; top:-2px; width:7px; height:7px; background:#1F6FEB; border-radius:50%; transform:translateX(-50%); }}
 
-            # Calculate button
-            st.markdown('''<style>
-            div[data-testid="stButton"] button {
-                background: linear-gradient(135deg,#1F6FEB,#0C54C7) !important;
-            }
-            </style>''', unsafe_allow_html=True)
-            if st.button("計算損益", key="calc_btn"):
-                b_sel = "sel_b" if sk in ("bull","bear") else "sel_b2"
-                sel_b_val = st.session_state.get(b_sel, "請選擇")
-                sel_s_val = st.session_state.get("sel_s", "請選擇") if sk in ("bull","bear") else "請選擇"
+.strat-row {{ display:flex; gap:8px; align-items:center; margin-bottom:10px; }}
+.strat-select {{ flex:1; background:#1C2128; border:1px solid #30363D; border-radius:10px; padding:10px 12px; color:#E6EDF3; font-size:13px; font-weight:600; }}
+.tip-btn {{ background:#0C2D6B; border:1px solid #1F6FEB; border-radius:8px; padding:8px 12px; color:#1F6FEB; font-size:12px; font-weight:600; cursor:pointer; white-space:nowrap; flex-shrink:0; }}
+.tip-box {{ background:#0C2D6B; border:1px solid #1F6FEB; border-radius:10px; padding:10px 14px; margin-bottom:10px; font-size:12px; color:#8B949E; line-height:1.6; display:none; }}
 
-                if sel_b_val == "請選擇" or sel_b_val not in opts_b:
-                    st.error("請選擇買入行權價")
-                elif sk in ("bull","bear") and (sel_s_val == "請選擇" or sel_s_val not in opts_s):
-                    st.error("請選擇賣出行權價")
-                else:
-                    bR = opts_b[sel_b_val]
-                    bK = bR["k"]; bP = bR["ask"]
-                    if sk in ("bull","bear"):
-                        sR = opts_s[sel_s_val]
-                        sK = sR["k"]; sP = sR["bid"]
-                    else:
-                        sK = 0; sP = 0
+.legs {{ display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:10px; }}
+.legs.single {{ grid-template-columns:1fr; }}
+.leg-card {{ border-radius:14px; padding:12px; }}
+.leg-card.buy {{ background:#0C2D6B; border:1.5px solid #1F6FEB; }}
+.leg-card.sell {{ background:#0D4429; border:1.5px solid #1A6B36; }}
+.leg-title {{ font-size:11px; font-weight:700; margin-bottom:8px; }}
+.leg-title.buy {{ color:#1F6FEB; }}
+.leg-title.sell {{ color:#3FB950; }}
+.leg-label {{ font-size:10px; color:#8B949E; margin-bottom:4px; }}
+.leg-select {{ width:100%; background:#1C2128; border:1px solid #30363D; border-radius:8px; padding:9px 10px; color:#E6EDF3; font-size:13px; font-weight:700; margin-bottom:6px; }}
+.prem-label {{ font-size:10px; color:#8B949E; margin-bottom:2px; }}
+.prem-val {{ font-size:22px; font-weight:900; color:#E6EDF3; }}
+.prem-placeholder {{ font-size:13px; color:#484F58; margin:4px 0; }}
 
-                    if sk == "bull":
-                        nc=bP-sP; maxP=(sK-bK-nc)*100; maxL=nc*100; be_val=bK+nc
-                    elif sk == "bear":
-                        nc=bP-sP; maxP=(bK-sK-nc)*100; maxL=nc*100; be_val=bK-nc
-                    elif sk == "call":
-                        maxP=None; maxL=bP*100; be_val=bK+bP
-                    else:
-                        maxP=None; maxL=bP*100; be_val=bK-bP
+.swap-btn {{ display:block; width:100%; background:#1C2128; border:1px solid #30363D; border-radius:8px; padding:8px 0; color:#8B949E; font-size:13px; cursor:pointer; margin-bottom:10px; }}
 
-                    show_result(sk, bK, bP, sK, sP, maxP, maxL, be_val, cur)
+.calc-btn {{ width:100%; background:linear-gradient(135deg,#1F6FEB,#0C54C7); border:none; border-radius:12px; padding:16px 0; color:#fff; font-size:16px; font-weight:800; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:10px; margin-bottom:14px; }}
+.calc-btn svg {{ flex-shrink:0; }}
 
-                    if st.button("⭐ 收藏這個組合", key="fav_calc"):
-                        add_fav({"sk":sk,"ticker":ticker,"expiry":expiry,"currentPrice":cur,
-                                 "bK":bK,"bP":bP,"sK":sK,"sP":sP,
-                                 "maxProfit":maxP,"maxLoss":maxL,"breakeven":be_val})
-                        st.success("已收藏！")
+.result-box {{ background:#161B22; border:1px solid #30363D; border-radius:14px; padding:14px; }}
+.result-title {{ font-size:14px; font-weight:700; margin-bottom:12px; }}
+.metrics {{ display:grid; grid-template-columns:1fr 1fr 1fr 1fr; gap:6px; margin-bottom:12px; }}
+.metric {{ border-radius:10px; padding:10px 8px; }}
+.metric.green {{ background:#0D4429; border:1.5px solid #1A6B36; }}
+.metric.red {{ background:#4A1015; border:1.5px solid #8B1A1A; }}
+.metric.gray {{ background:#1C2128; border:1.5px solid #30363D; }}
+.metric.purp {{ background:#2D1F52; border:1.5px solid #6E40C9; }}
+.metric-label {{ font-size:9px; font-weight:700; margin-bottom:3px; letter-spacing:0.5px; }}
+.metric.green .metric-label {{ color:#86EFAC; }}
+.metric.red .metric-label {{ color:#FCA5A5; }}
+.metric.gray .metric-label {{ color:#8B949E; }}
+.metric.purp .metric-label {{ color:#C4B5FD; }}
+.metric-val {{ font-size:15px; font-weight:900; letter-spacing:-0.5px; }}
+.metric.green .metric-val {{ color:#4ADE80; }}
+.metric.red .metric-val {{ color:#F87171; }}
+.metric.gray .metric-val {{ color:#E6EDF3; }}
+.metric.purp .metric-val {{ color:#A78BFA; }}
+.metric-sub {{ font-size:9px; font-weight:600; margin-top:1px; }}
+.metric.green .metric-sub {{ color:#4ADE80; }}
+.metric.red .metric-sub {{ color:#F87171; }}
 
-    st.markdown('</div>', unsafe_allow_html=True)
+.ladder {{ background:#1C2128; border-radius:12px; overflow:hidden; margin-top:12px; }}
+.ladder-header {{ padding:8px 12px; display:flex; justify-content:space-between; border-bottom:1px solid #30363D; }}
+.ladder-head-label {{ font-size:10px; color:#8B949E; font-weight:700; text-transform:uppercase; letter-spacing:1px; }}
+.ladder-step {{ font-size:10px; color:#484F58; background:#21262D; padding:1px 8px; border-radius:100px; }}
+.ladder-cols {{ display:grid; grid-template-columns:1fr 1fr 1fr; background:#21262D; padding:5px 12px; border-bottom:1px solid #30363D; }}
+.ladder-col-head {{ font-size:9px; color:#484F58; font-weight:700; text-transform:uppercase; letter-spacing:0.5px; }}
+.ladder-col-head:not(:first-child) {{ text-align:right; }}
+.ladder-row {{ display:grid; grid-template-columns:1fr 1fr 1fr; padding:6px 12px; border-bottom:1px solid #161B22; }}
+.ladder-price {{ font-size:12px; color:#E6EDF3; font-weight:500; display:flex; align-items:center; gap:4px; }}
+.ladder-pnl, .ladder-ret {{ font-size:12px; font-weight:600; text-align:right; }}
+.tag {{ font-size:8px; padding:1px 5px; border-radius:100px; font-weight:700; }}
+.tag-be {{ background:#1A1000; color:#F0B429; }}
+.tag-max {{ background:#0D2010; color:#4ADE80; }}
+</style>
+</head>
+<body>
+
+<script>
+const STOCK  = {stock_json};
+const CALLS  = {calls_json};
+const PUTS   = {puts_json};
+
+const STRATS = {{
+  bull:{{ label:"看漲價差 Bull Call Spread", tip:"買低Call賣高Call，看漲限風險，最大獲利固定。" }},
+  bear:{{ label:"看跌價差 Bear Put Spread",  tip:"買高Put賣低Put，看跌限風險，最大獲利固定。" }},
+  call:{{ label:"單買 Call (Long Call)",     tip:"直接買入Call，無限獲利潛力，最多虧損全部權利金。" }},
+  put: {{ label:"單買 Put (Long Put)",       tip:"直接買入Put，跌越多賺越多，最多虧損全部權利金。" }},
+}};
+
+let sk = "bull";
+let tipOpen = false;
+let result = null;
+
+function pnl(sk, bK, bP, sK, sP, price) {{
+  if (sk==="bull") {{
+    const nc=bP-sP;
+    if(price<=bK) return -nc*100;
+    if(price>=sK) return (sK-bK-nc)*100;
+    return (price-bK-nc)*100;
+  }}
+  if (sk==="bear") {{
+    const nc=bP-sP;
+    if(price>=bK) return -nc*100;
+    if(price<=sK) return (bK-sK-nc)*100;
+    return (bK-price-nc)*100;
+  }}
+  if (sk==="call") return (Math.max(price-bK,0)-bP)*100;
+  if (sk==="put")  return (Math.max(bK-price,0)-bP)*100;
+  return 0;
+}}
+
+function findBE(sk,bK,bP,sK,sP,cur) {{
+  const lo=Math.min(bK,sK||bK,cur)*0.75, hi=Math.max(bK,sK||bK,cur)*1.35;
+  let prev=pnl(sk,bK,bP,sK,sP,lo);
+  for(let i=1;i<=600;i++) {{
+    const p=lo+(hi-lo)*i/600;
+    const cur2=pnl(sk,bK,bP,sK,sP,p);
+    if((prev<=0&&cur2>0)||(prev>=0&&cur2<0)) {{
+      const f=Math.abs(prev)/(Math.abs(prev)+Math.abs(cur2));
+      return lo+(hi-lo)*(i-1+f)/600;
+    }}
+    prev=cur2;
+  }}
+  return null;
+}}
+
+function makeSVG(sk,bK,bP,sK,sP,cur) {{
+  const unlimited=sk==="call"||sk==="put";
+  const profitRight=sk==="bull"||sk==="call";
+  const be=findBE(sk,bK,bP,sK,sP,cur);
+  const allKey=[bK,cur,...(sK?[sK]:[]),...(be?[be]:[])];
+  const center=be||cur;
+  const span=Math.max(Math.max(...allKey)-Math.min(...allKey),cur*0.16)*1.5;
+  const lo=center-span*0.55, hi=center+span*0.55;
+  const N=200;
+  const pts=Array.from({{length:N+1}},(_,i)=>lo+(hi-lo)*i/N);
+  const pnls=pts.map(p=>pnl(sk,bK,bP,sK,sP,p));
+  const maxV=Math.max(...pnls), minV=Math.min(...pnls);
+  if(maxV===minV) return "";
+  const W=360,H=230,pX=14,pTop=26,pBot=10,labH=34;
+  const pH=H-pTop-pBot-labH;
+  const vpad=(maxV-minV)*0.18;
+  const vT=maxV+vpad, vR=(vT-(minV-vpad))||1;
+  const cx=p=>pX+((p-lo)/(hi-lo))*(W-2*pX);
+  const cy=v=>pTop+(vT-v)/vR*pH;
+  const zY=cy(0);
+  const lineD=pts.map((p,i)=>(i?"L":"M")+cx(p).toFixed(1)+","+cy(pnls[i]).toFixed(1)).join(" ");
+  const fillD=lineD+" L"+cx(hi).toFixed(1)+","+zY.toFixed(1)+" L"+cx(lo).toFixed(1)+","+zY.toFixed(1)+" Z";
+  const ticks=Array.from({{length:6}},(_,i)=>{{
+    const p=lo+(hi-lo)*i/5,tx=cx(p);
+    return `<line x1="${{tx.toFixed(1)}}" y1="${{zY.toFixed(1)}}" x2="${{tx.toFixed(1)}}" y2="${{(zY+4).toFixed(1)}}" stroke="#444" stroke-width="0.8"/>
+            <text x="${{tx.toFixed(1)}}" y="${{(zY+13).toFixed(1)}}" fill="#444" font-size="7.5" text-anchor="middle">$${{p.toFixed(0)}}</text>`;
+  }}).join("");
+  const curLine=lo<cur&&cur<hi?`<line x1="${{cx(cur).toFixed(1)}}" y1="${{pTop}}" x2="${{cx(cur).toFixed(1)}}" y2="${{H-pBot-labH}}" stroke="#1F6FEB" stroke-width="1" stroke-dasharray="4 3" opacity="0.5"/>
+    <text x="${{cx(cur).toFixed(1)}}" y="${{pTop-4}}" fill="#1F6FEB" font-size="9" text-anchor="middle" font-weight="600">現價 $${{cur}}</text>`:"";
+  const dots=[[bK,true],...(sK?[[sK,false]]:[])].map(([dk,buy])=>{{
+    if(dk<lo||dk>hi) return "";
+    const mc=buy?"#60A5FA":"#FB923C";
+    const dy=cy(pnl(sk,bK,bP,sK,sP,dk)), sx=cx(dk);
+    const above=dy>H*0.45; const by2=above?dy-27:dy+11;
+    const lbl=(buy?"買入":"賣出")+" $"+dk;
+    return `<rect x="${{(sx-34).toFixed(1)}}" y="${{by2.toFixed(1)}}" width="68" height="14" rx="3" fill="#0A0A0A" opacity="0.92"/>
+            <text x="${{sx.toFixed(1)}}" y="${{(by2+11).toFixed(1)}}" fill="${{mc}}" font-size="9" text-anchor="middle" font-weight="700">${{lbl}}</text>
+            <circle cx="${{sx.toFixed(1)}}" cy="${{dy.toFixed(1)}}" r="5" fill="${{mc}}"/>
+            <circle cx="${{sx.toFixed(1)}}" cy="${{dy.toFixed(1)}}" r="9" fill="${{mc}}" opacity="0.18"/>`;
+  }}).join("");
+  const beEl=be&&lo<be&&be<hi?`<rect x="${{(cx(be)-36).toFixed(1)}}" y="${{(zY-32).toFixed(1)}}" width="72" height="24" rx="4" fill="#0A0A0A" opacity="0.92"/>
+    <text x="${{cx(be).toFixed(1)}}" y="${{(zY-20).toFixed(1)}}" fill="#F0B429" font-size="8" text-anchor="middle" font-weight="600">損益平衡</text>
+    <text x="${{cx(be).toFixed(1)}}" y="${{(zY-9).toFixed(1)}}" fill="#F0B429" font-size="10" text-anchor="middle" font-weight="800">$${{be.toFixed(2)}}</text>
+    <circle cx="${{cx(be).toFixed(1)}}" cy="${{zY.toFixed(1)}}" r="5" fill="#F0B429"/>
+    <circle cx="${{cx(be).toFixed(1)}}" cy="${{zY.toFixed(1)}}" r="9" fill="#F0B429" opacity="0.22"/>`:"";
+  const bY=H-labH+14, bY2=H-labH+27;
+  const pX1=profitRight?W-pX-4:pX+4, pA1=profitRight?"end":"start";
+  const lX1=profitRight?pX+4:W-pX-4, lA1=profitRight?"start":"end";
+  const mpTxt=unlimited?"∞":("+$"+maxV.toFixed(0));
+  const mlTxt="-$"+Math.abs(minV).toFixed(0);
+  return `<svg viewBox="0 0 ${{W}} ${{H}}" style="width:100%;height:${{H}}px;display:block;background:#0D1117;border-radius:14px;margin-top:10px">
+    <defs>
+      <clipPath id="cp_p"><rect x="${{pX}}" y="${{pTop}}" width="${{W-2*pX}}" height="${{Math.max(zY-pTop,0).toFixed(1)}}"/></clipPath>
+      <clipPath id="cp_l"><rect x="${{pX}}" y="${{zY.toFixed(1)}}" width="${{W-2*pX}}" height="${{Math.max(pH-(zY-pTop)+pBot+4,0).toFixed(1)}}"/></clipPath>
+    </defs>
+    <line x1="${{pX}}" y1="${{zY.toFixed(1)}}" x2="${{W-pX}}" y2="${{zY.toFixed(1)}}" stroke="#2A2A2A" stroke-width="1" stroke-dasharray="4 3"/>
+    ${{ticks}}${{curLine}}
+    <path d="${{fillD}}" fill="#4ADE80" opacity="0.18" clip-path="url(#cp_p)"/>
+    <path d="${{fillD}}" fill="#F87171" opacity="0.18" clip-path="url(#cp_l)"/>
+    <path d="${{lineD}}" fill="none" stroke="#4ADE80" stroke-width="2.5" stroke-linejoin="round" clip-path="url(#cp_p)"/>
+    <path d="${{lineD}}" fill="none" stroke="#F87171" stroke-width="2.5" stroke-linejoin="round" clip-path="url(#cp_l)"/>
+    ${{dots}}${{beEl}}
+    <text x="${{pX1}}" y="${{bY}}" fill="#4ADE80" font-size="8" font-weight="700" text-anchor="${{pA1}}">最大獲利</text>
+    <text x="${{pX1}}" y="${{bY2}}" fill="#4ADE80" font-size="12" font-weight="800" text-anchor="${{pA1}}">${{mpTxt}}</text>
+    <text x="${{lX1}}" y="${{bY}}" fill="#F87171" font-size="8" font-weight="700" text-anchor="${{lA1}}">最大虧損</text>
+    <text x="${{lX1}}" y="${{bY2}}" fill="#F87171" font-size="12" font-weight="800" text-anchor="${{lA1}}">${{mlTxt}}</text>
+  </svg>`;
+}}
+
+function makeLadder(sk,bK,bP,sK,sP,maxL,be,cur) {{
+  const spread=sK?Math.abs(bK-sK):bP*5;
+  const step=spread<5?1:spread<=10?1:spread<=20?2.5:spread<=50?5:10;
+  const lo=Math.floor(Math.min(bK,sK||bK,cur)*0.88/step)*step;
+  const hi=Math.ceil(Math.max(bK,sK||bK,cur)*1.12/step)*step;
+  const allRows=[];
+  for(let p=lo;p<=hi+0.001;p=Math.round((p+step)*1000)/1000) {{
+    const v=pnl(sk,bK,bP,sK,sP,p);
+    const ret=maxL?v/maxL*100:0;
+    const nearBE=be!=null&&Math.abs(p-be)<=step*0.55;
+    const isMax=(sk==="bull"&&sK&&p>=sK)||(sk==="bear"&&sK&&p<=sK);
+    allRows.push({{p,v,ret,nearBE,isMax}});
+  }}
+  // trim
+  let minIdx=0, maxIdx=allRows.length-1;
+  for(let i=1;i<allRows.length;i++) {{ if(allRows[i].v!==allRows[0].v){{minIdx=Math.max(0,i-1);break;}} }}
+  if(sK) {{ for(let i=0;i<allRows.length;i++) {{ if(allRows[i].isMax){{maxIdx=Math.min(i+5,allRows.length-1);break;}} }} }}
+  const rows=allRows.slice(minIdx,maxIdx+1);
+  const stepStr=step%1===0?step.toFixed(0):step.toFixed(1);
+  let html=`<div class="ladder">
+    <div class="ladder-header"><span class="ladder-head-label">損益對照表</span><span class="ladder-step">每 $${{stepStr}}</span></div>
+    <div class="ladder-cols"><span class="ladder-col-head">股價</span><span class="ladder-col-head">損益/張</span><span class="ladder-col-head">報酬率</span></div>`;
+  rows.forEach(r=>{{
+    const col=r.v>0?"#4ADE80":r.v<0?"#F87171":"#F0B429";
+    const bg=r.v>1?"rgba(74,222,128,0.05)":r.v<-1?"rgba(248,113,113,0.05)":"rgba(240,180,41,0.06)";
+    const pStr="$"+(r.p%1===0?r.p.toFixed(0):r.p.toFixed(2));
+    const pnlStr=(r.v>=0?"+":"")+r.v.toFixed(0);
+    const retStr=(r.ret>=0?"+":"")+r.ret.toFixed(0)+"%";
+    const tags=(r.nearBE?'<span class="tag tag-be">平衡</span>':'')+(r.isMax?'<span class="tag tag-max">MAX</span>':'');
+    html+=`<div class="ladder-row" style="background:${{bg}}">
+      <span class="ladder-price">${{pStr}}${{tags}}</span>
+      <span class="ladder-pnl" style="color:${{col}}">${{pnlStr}}</span>
+      <span class="ladder-ret" style="color:${{col}}">${{retStr}}</span>
+    </div>`;
+  }});
+  html+="</div>";
+  return html;
+}}
+
+function render() {{
+  const s=STOCK;
+  const chgColor=s.change<0?"#F85149":"#3FB950";
+  const upside=s.target&&s.price?(((s.target-s.price)/s.price)*100).toFixed(1):null;
+  const uColor=upside&&upside>=0?"#3FB950":"#F85149";
+  const barPct=s.lo52&&s.hi52?Math.max(0,Math.min(100,((s.price-s.lo52)/(s.hi52-s.lo52)*100).toFixed(0))):50;
+
+  // Strategy options
+  const stratOpts=Object.entries(STRATS).map(([k,v])=>`<option value="${{k}}" ${{sk===k?"selected":""}}>${{v.label}}</option>`).join("");
+  const isSingle=sk==="call"||sk==="put";
+  const bArr=sk==="bear"||sk==="put"?PUTS:CALLS;
+  const sArr=sk==="bear"?PUTS:CALLS;
+  const bOpts=bArr.map(r=>`<option value="${{r.k}}">${{r.k%1===0?r.k.toFixed(0):r.k.toFixed(1)}}  (Ask $${{r.ask.toFixed(2)}})</option>`).join("");
+  const sOpts=sArr.map(r=>`<option value="${{r.k}}">${{r.k%1===0?r.k.toFixed(0):r.k.toFixed(1)}}  (Bid $${{r.bid.toFixed(2)}})</option>`).join("");
+
+  const bSel=document.getElementById("sel_b")?.value;
+  const sSel=document.getElementById("sel_s")?.value;
+  const bR=bArr.find(r=>r.k==bSel);
+  const sR=sArr.find(r=>r.k==sSel);
+
+  // result rendered separately to avoid innerHTML escaping SVG
+  const resultPlaceholder = result ? '<div id="result_area"></div>' : '';
+
+  document.getElementById("app").innerHTML=`
+    <div class="stock-card">
+      <div class="stock-header">
+        <div style="display:flex;gap:10px;align-items:center">
+          <div class="stock-logo">${{s.ticker}}</div>
+          <div>
+            <div class="stock-name">${{s.name}}</div>
+            <div class="stock-badges">
+              ${{s.exchange?`<span class="badge">${{s.exchange}}</span>`:""}}
+              ${{s.sector?`<span class="badge">${{s.sector}}</span>`:""}}
+            </div>
+          </div>
+        </div>
+        <div class="stock-price">
+          <div class="price-big">$${{s.price?.toFixed(2)||"—"}}</div>
+          <div class="price-chg" style="color:${{chgColor}}">${{(s.change>=0?"+":"")+s.change?.toFixed(2)}} (${{(s.changePct>=0?"+":"")+s.changePct?.toFixed(2)}}%)</div>
+        </div>
+      </div>
+      <div class="info-grid">
+        ${{s.target?`<div class="info-cell"><span class="info-label">分析師目標</span><div class="info-val">$${{s.target.toFixed(2)}} <span style="color:${{uColor}}">${{(upside>=0?"+":"")+upside}}%</span></div></div>`:""}}
+        ${{s.lo52&&s.hi52?`<div class="info-cell"><span class="info-label">52週區間</span><div class="info-val">${{s.lo52.toFixed(0)}}–${{s.hi52.toFixed(0)}}<div class="bar-wrap"><div class="bar-dot" style="left:${{barPct}}%"></div></div></div></div>`:""}}
+        <div class="info-cell"><span class="info-label">下一財報</span><span class="info-val" style="color:#F79000">${{s.nextER||"—"}}</span></div>
+        <div class="info-cell"><span class="info-label">即時連線</span><span class="info-val" style="color:#3FB950">● 已連線</span></div>
+      </div>
+    </div>
+
+    <div class="strat-row">
+      <select class="strat-select" id="strat_sel" onchange="changeSk(this.value)">${{stratOpts}}</select>
+      <button class="tip-btn" onclick="toggleTip()">ⓘ 說明</button>
+    </div>
+    <div class="tip-box" id="tip_box">${{STRATS[sk].tip}}</div>
+
+    <div class="legs ${{isSingle?'single':''}}" id="legs_div">
+      <div class="leg-card buy">
+        <div class="leg-title buy">${{sk==="bull"?"買入 Call (Long Call)":sk==="bear"?"買入 Put (Long Put)":sk==="call"?"買入 Call (Long Call)":"買入 Put (Long Put)"}}</div>
+        <div class="leg-label">履約價 (Strike)</div>
+        <select class="leg-select" id="sel_b" onchange="onPick()">
+          <option value="">點此選擇行權價</option>
+          ${{bOpts}}
+        </select>
+        ${{bR?`<div class="prem-label">Ask 權利金</div><div class="prem-val">$${{bR.ask.toFixed(2)}}</div>`:'<div class="prem-placeholder">選擇後顯示權利金</div>'}}
+      </div>
+      ${{!isSingle?`<div class="leg-card sell">
+        <div class="leg-title sell">${{sk==="bull"?"賣出 Call (Short Call)":"賣出 Put (Short Put)"}}</div>
+        <div class="leg-label">履約價 (Strike)</div>
+        <select class="leg-select" id="sel_s" onchange="onPick()">
+          <option value="">點此選擇行權價</option>
+          ${{sOpts}}
+        </select>
+        ${{sR?`<div class="prem-label">Bid 權利金</div><div class="prem-val">$${{sR.bid.toFixed(2)}}</div>`:'<div class="prem-placeholder">選擇後顯示權利金</div>'}}
+      </div>`:"" }}
+    </div>
+
+    ${{!isSingle?`<button class="swap-btn" onclick="swapLegs()">⇄ 互換行權價</button>`:""}}
+
+    <button class="calc-btn" onclick="doCalc()">
+      <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
+        <polyline points="2,14 7,8 11,11 18,4" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+        <polyline points="14,4 18,4 18,8" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+      計 算 損 益
+    </button>
+
+    ${{resultPlaceholder}}
+  `;
+
+  // inject result AFTER main innerHTML to avoid SVG escaping
+  if(result) {{
+    const {{maxP,maxL,be,bK,bP,sK,sP}}=result;
+    const unlimited=sk==="call"||sk==="put";
+    const mpStr=unlimited?"∞":"$"+maxP.toFixed(0);
+    const mpSub=unlimited?"":"+"+((maxP/maxL)*100).toFixed(0)+"%";
+    const rorStr=unlimited?"∞":((maxP/maxL)*100).toFixed(0)+"%";
+    const beStr=be!=null?"$"+be.toFixed(2):"—";
+    const mlStr="-$"+(maxL.toFixed(0));
+    const mlSub="-"+((maxL/(maxL+(maxP||maxL))*100).toFixed(0))+"%";
+    const resultEl=document.getElementById("result_area");
+    if(resultEl) {{
+      resultEl.innerHTML="<div class='result-box'>"
+        +"<div class='result-title'>損益總覽</div>"
+        +"<div class='metrics'>"
+        +"<div class='metric green'><div class='metric-label'>最大獲利</div><div class='metric-val'>"+mpStr+"</div><div class='metric-sub'>"+mpSub+"</div></div>"
+        +"<div class='metric red'><div class='metric-label'>最大虧損</div><div class='metric-val'>"+mlStr+"</div><div class='metric-sub'>"+mlSub+"</div></div>"
+        +"<div class='metric gray'><div class='metric-label'>報酬率</div><div class='metric-val'>"+rorStr+"</div></div>"
+        +"<div class='metric purp'><div class='metric-label'>損益平衡</div><div class='metric-val'>"+beStr+"</div></div>"
+        +"</div></div>";
+      // append SVG and ladder separately
+      const svgDiv=document.createElement("div");
+      svgDiv.innerHTML=makeSVG(sk,bK,bP,sK,sP,s.price);
+      resultEl.firstChild.appendChild(svgDiv);
+      const ladderDiv=document.createElement("div");
+      ladderDiv.innerHTML=makeLadder(sk,bK,bP,sK,sP,maxL,be,s.price);
+      resultEl.firstChild.appendChild(ladderDiv);
+    }}
+  }}
+
+  // restore selections
+  if(bSel) document.getElementById("sel_b").value=bSel;
+  if(sSel&&document.getElementById("sel_s")) document.getElementById("sel_s").value=sSel;
+  if(tipOpen) document.getElementById("tip_box").style.display="block";
+}}
+
+function changeSk(v) {{ sk=v; result=null; render(); }}
+function toggleTip() {{ tipOpen=!tipOpen; document.getElementById("tip_box").style.display=tipOpen?"block":"none"; }}
+function onPick() {{ result=null; render(); }}
+function swapLegs() {{
+  const b=document.getElementById("sel_b")?.value;
+  const s=document.getElementById("sel_s")?.value;
+  render();
+  setTimeout(()=>{{
+    if(document.getElementById("sel_b")) document.getElementById("sel_b").value=s||"";
+    if(document.getElementById("sel_s")) document.getElementById("sel_s").value=b||"";
+  }},10);
+  result=null;
+}}
+
+function doCalc() {{
+  const s=STOCK;
+  const bArr=sk==="bear"||sk==="put"?PUTS:CALLS;
+  const sArr=sk==="bear"?PUTS:CALLS;
+  const bSel=document.getElementById("sel_b")?.value;
+  const sSel=document.getElementById("sel_s")?.value;
+  if(!bSel) {{ alert("請選擇買入行權價"); return; }}
+  if((sk==="bull"||sk==="bear")&&!sSel) {{ alert("請選擇賣出行權價"); return; }}
+  const bR=bArr.find(r=>r.k==bSel);
+  const sR=sSel?sArr.find(r=>r.k==sSel):null;
+  if(!bR) return;
+  const bK=bR.k, bP=bR.ask;
+  const sK=sR?sR.k:0, sP=sR?sR.bid:0;
+  let maxP,maxL,be;
+  if(sk==="bull") {{ const nc=bP-sP; maxP=(sK-bK-nc)*100; maxL=nc*100; be=bK+nc; }}
+  else if(sk==="bear") {{ const nc=bP-sP; maxP=(bK-sK-nc)*100; maxL=nc*100; be=bK-nc; }}
+  else if(sk==="call") {{ maxP=null; maxL=bP*100; be=bK+bP; }}
+  else {{ maxP=null; maxL=bP*100; be=bK-bP; }}
+  result={{maxP,maxL,be,bK,bP,sK,sP}};
+  render();
+}}
+
+render();
+</script>
+
+<div id="app"></div>
+
+</body>
+</html>
+"""
+        components.html(html_component, height=1800, scrolling=True)
 
 # ══════ TAB 2: AI 掃描 ══════
 with tab2:
