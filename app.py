@@ -505,12 +505,34 @@ tab1, tab2, tab3, tab4 = st.tabs(["選股計算", "AI 掃描", "我的組合", "
 with tab1:
     import streamlit.components.v1 as components
 
-    # Watchlist quick select
+    # Watchlist quick select — 2 rows of 5
     WATCHLIST = ["MU","NVDA","ORCL","DKNG","AAPL","TSLA","AMZN","MSFT","IBIT","SRAD"]
-    btn_style = "background:#1C2128;border:1px solid #30363D;border-radius:100px;padding:4px 10px;color:#8B949E;font-size:12px;font-weight:600;margin:2px;cursor:pointer;display:inline-block"
-    wl_html = "".join([f'<span style="{btn_style}">{t}</span>' for t in WATCHLIST])
-    st.markdown(f'<div style="margin-bottom:8px">{wl_html}</div>', unsafe_allow_html=True)
-    st.caption("👆 快速選股（輸入或點上方代號）")
+    # Add CSS to make watchlist buttons look like small chips
+    st.markdown("""
+    <style>
+    [data-testid="stHorizontalBlock"]:has([data-testid="stButton"]) button {
+        background:#1C2128!important;
+        border:1px solid #30363D!important;
+        border-radius:100px!important;
+        font-size:11px!important;
+        font-weight:700!important;
+        padding:5px 2px!important;
+        color:#8B949E!important;
+        min-height:0!important;
+        height:28px!important;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+    row1 = st.columns(5)
+    row2 = st.columns(5)
+    for i, t in enumerate(WATCHLIST[:5]):
+        if row1[i].button(t, key=f"wl_{t}"):
+            st.session_state["tk"] = t
+            st.rerun()
+    for i, t in enumerate(WATCHLIST[5:]):
+        if row2[i].button(t, key=f"wl_{t}"):
+            st.session_state["tk"] = t
+            st.rerun()
 
     t1c1, t1c2 = st.columns([2,1])
     ticker = t1c1.text_input("股票代號", placeholder="MU / ORCL / DKNG", key="tk").upper().strip()
