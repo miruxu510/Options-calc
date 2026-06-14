@@ -587,44 +587,62 @@ with tab1:
                 sc = strat_colors[cur_strat]
                 st.markdown(f'<div style="font-size:11px;color:{sc};font-weight:600;margin-bottom:6px">👇 點選「{leg_label_map[next_leg]}」的行權價</div>', unsafe_allow_html=True)
 
-            # ── Chain table ──────────────────────────────
+            # ── Chain table — pure HTML, no st.button (avoids green CSS) ──
             is_call_leg = next_leg and "Call" in next_leg
             is_put_leg  = next_leg and "Put"  in next_leg
             is_buy = next_leg and next_leg.startswith("buy")
 
-            header_html = f'''<div style="display:grid;grid-template-columns:1fr 56px 1fr;background:#1C1C1C;border-radius:12px 12px 0 0;padding:6px 0">
-              <div style="text-align:center;font-size:10px;color:#22C55E;font-weight:700">CALL</div>
-              <div style="text-align:center;font-size:10px;color:#555;font-weight:700">行權價</div>
-              <div style="text-align:center;font-size:10px;color:#EF4444;font-weight:700">PUT</div></div>'''
-            st.markdown(header_html, unsafe_allow_html=True)
-
+            # Build full HTML table with clickable rows via selectbox trick
+            rows_html = ""
+            pickable_strikes = []
             for row in chain_rows:
-                strike = row.get("strike",0)
+                strike = row.get("strike", 0)
                 atm = chain_cur and abs(strike - chain_cur) < 1.5
                 call_p = row.get("callAsk" if is_buy else "callBid")
                 put_p  = row.get("putAsk"  if is_buy else "putBid")
                 call_val = f"${fmt(call_p)}" if call_p else "—"
                 put_val  = f"${fmt(put_p)}"  if put_p  else "—"
-                row_bg = "rgba(59,130,246,0.06)" if atm else "transparent"
-                strike_color = "#3B82F6" if atm else "#F0F0F0"
+                sk_str = f"{strike:.0f}" if strike == int(strike) else str(strike)
+                sk_color = "#3B82F6" if atm else "#F0F0F0"
+                row_bg = "rgba(59,130,246,0.05)" if atm else "transparent"
 
-                col_l, col_m, col_r = st.columns([1, 0.6, 1])
-                with col_l:
-                    if is_call_leg and call_p:
-                        if st.button(call_val, key=f"cl_{strike}", use_container_width=True):
-                            st.session_state["chain_legs"][next_leg] = {"strike":strike,"prem":call_p}
-                            st.rerun()
-                    else:
-                        st.markdown(f'<div style="text-align:center;font-size:12px;color:#555;padding:6px 0">{call_val}</div>', unsafe_allow_html=True)
-                with col_m:
-                    st.markdown(f'<div style="text-align:center;font-size:13px;font-weight:800;color:{strike_color};padding:6px 0">{strike:.0f if strike==int(strike) else strike}</div>', unsafe_allow_html=True)
-                with col_r:
-                    if is_put_leg and put_p:
-                        if st.button(put_val, key=f"pt_{strike}", use_container_width=True):
-                            st.session_state["chain_legs"][next_leg] = {"strike":strike,"prem":put_p}
-                            st.rerun()
-                    else:
-                        st.markdown(f'<div style="text-align:center;font-size:12px;color:#555;padding:6px 0">{put_val}</div>', unsafe_allow_html=True)
+                if is_call_leg and call_p:
+                    call_cell = f'<td style="padding:6px 8px;text-align:center;background:#22C55E18;border:1px solid #22C55E44;border-radius:7px;cursor:pointer;font-size:13px;font-weight:700;color:#22C55E">{call_val}</td>'
+                    pickable_strikes.append(("call", strike, call_p, call_val))
+                else:
+                    call_cell = f'<td style="padding:6px 8px;text-align:center;font-size:12px;color:#444">{call_val}</td>'
+
+                if is_put_leg and put_p:
+                    put_cell = f'<td style="padding:6px 8px;text-align:center;background:#EF444418;border:1px solid #EF444444;border-radius:7px;cursor:pointer;font-size:13px;font-weight:700;color:#EF4444">{put_val}</td>'
+                    pickable_strikes.append(("put", strike, put_p, put_val))
+                else:
+                    put_cell = f'<td style="padding:6px 8px;text-align:center;font-size:12px;color:#444">{put_val}</td>'
+
+                rows_html += f'<tr style="background:{row_bg}">{call_cell}<td style="padding:6px 4px;text-align:center;font-size:13px;font-weight:800;color:{sk_color}">{sk_str}</td>{put_cell}</tr>'
+
+            st.markdown(f'''<div style="background:#1C1C1C;border-radius:12px;overflow:hidden;margin-bottom:8px">
+              <table style="width:100%;border-collapse:collapse">
+                <thead><tr style="background:#242424">
+                  <th style="padding:7px 8px;text-align:center;font-size:10px;color:#22C55E;font-weight:700;letter-spacing:0.5px">CALL</th>
+                  <th style="padding:7px 8px;text-align:center;font-size:10px;color:#555;font-weight:700">行權價</th>
+                  <th style="padding:7px 8px;text-align:center;font-size:10px;color:#EF4444;font-weight:700;letter-spacing:0.5px">PUT</th>
+                </tr></thead>
+                <tbody>{rows_html}</tbody>
+              </table></div>''', unsafe_allow_html=True)
+
+            # Picker: selectbox of available strikes
+            if next_leg and pickable_strikes:
+                leg_type = "call" if is_call_leg else "put"
+                options = [f"{val}  (行權價 ${s})" for t,s,p,val in pickable_strikes if t==leg_type]
+                picks   = [(s,p) for t,s,p,val in pickable_strikes if t==leg_type]
+                if options:
+                    chosen_idx = st.selectbox("點選行權價", range(len(options)),
+                        format_func=lambda i: options[i], key=f"pick_{next_leg}",
+                        label_visibility="collapsed")
+                    if st.button("✓ 確認選擇", key=f"confirm_{next_leg}"):
+                        s, p = picks[chosen_idx]
+                        st.session_state["chain_legs"][next_leg] = {"strike": s, "prem": p}
+                        st.rerun()
 
             # ── Result ───────────────────────────────────
             if all(n in cur_legs for n in needs):
