@@ -101,8 +101,23 @@ def get_chain(sym, exp):
     if not HAS_YF or not sym or not exp: return [],[]
     try:
         opt=yf.Ticker(sym).option_chain(exp)
-        calls=[{"k":r["strike"],"bid":round(r["bid"],2),"ask":round(r["ask"],2)} for r in opt.calls[["strike","bid","ask"]].dropna().to_dict("records")]
-        puts=[{"k":r["strike"],"bid":round(r["bid"],2),"ask":round(r["ask"],2)} for r in opt.puts[["strike","bid","ask"]].dropna().to_dict("records")]
+        def chain_rows(df):
+            rows=[]
+            for r in df.to_dict("records"):
+                k=r.get("strike",0)
+                bid=r.get("bid",0) or 0
+                ask=r.get("ask",0) or 0
+                last=r.get("lastPrice",0) or 0
+                # Use lastPrice as fallback when bid/ask are 0 (after hours)
+                if bid==0 and ask==0 and last>0:
+                    bid=round(last*0.95,2); ask=round(last*1.05,2)
+                if k>0 and (bid>0 or ask>0 or last>0):
+                    rows.append({"k":k,"bid":round(bid,2),"ask":round(ask if ask>0 else last,2),"last":round(last,2)})
+            return rows
+        cols=[c for c in ["strike","bid","ask","lastPrice"] if c in opt.calls.columns]
+        calls=chain_rows(opt.calls[cols].dropna(subset=["strike"]))
+        cols=[c for c in ["strike","bid","ask","lastPrice"] if c in opt.puts.columns]
+        puts=chain_rows(opt.puts[cols].dropna(subset=["strike"]))
         return calls,puts
     except: return [],[]
 
