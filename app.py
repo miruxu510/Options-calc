@@ -58,9 +58,9 @@ def compress(uf):
 @st.cache_data(ttl=60)
 def get_info(sym):
     if not sym: return {}
-    # Try Polygon for price first
+    # Try Polygon for price
     poly_key = st.secrets.get("POLYGON_API_KEY","")
-    poly_out = {}
+    poly_price = None; poly_change = None; poly_pct = None
     if poly_key:
         try:
             import urllib.request, json as _j
@@ -73,12 +73,15 @@ def get_info(sym):
             price = t.get("lastTrade",{}).get("p") or day.get("c")
             prev_c = prev.get("c")
             if price:
-                poly_out["price"] = round(float(price),2)
-                if prev_c:
-                    poly_out["change"] = round(float(price)-float(prev_c),2)
-                    poly_out["pct"]    = round((float(price)-float(prev_c))/float(prev_c)*100,2)
+                poly_price = round(float(price),2)
+                if prev_c and float(prev_c)>0:
+                    poly_change = round(float(price)-float(prev_c),2)
+                    poly_pct    = round((float(price)-float(prev_c))/float(prev_c)*100,2)
         except: pass
-    if not HAS_YF or not sym: return poly_out
+    if not HAS_YF: 
+        out = {}
+        if poly_price: out["price"]=poly_price; out["change"]=poly_change or 0; out["pct"]=poly_pct or 0
+        return out
     try:
         t=yf.Ticker(sym); out={}
         try:
@@ -112,11 +115,14 @@ def get_info(sym):
                 ed=cal.get("Earnings Date")
                 if ed: out["nextER"]=str(ed[0] if isinstance(ed,list) else ed)[:10]
         except: pass
-        # Merge polygon price if yfinance didn't get it
-        if poly_out.get('price') and not out.get('price'): out['price']=poly_out['price']
-        if poly_out.get('change') and not out.get('change'): out['change']=poly_out['change']; out['pct']=poly_out.get('pct',0)
+        # Use Polygon price if available (more accurate/real-time)
+        if poly_price: out['price']=poly_price
+        if poly_change is not None: out['change']=poly_change; out['pct']=poly_pct or 0
         return out
-    except: return poly_out
+    except:
+        out={}
+        if poly_price: out['price']=poly_price; out['change']=poly_change or 0; out['pct']=poly_pct or 0
+        return out
 
 @st.cache_data(ttl=120)
 def get_expiries(sym):
@@ -326,16 +332,22 @@ def show_result(sk,bK,bP,sK,sP,maxP,maxL,be,cur):
     st.markdown(make_ladder(sk,bK,bP,sK,sP,maxL,be,cur), unsafe_allow_html=True)
 
 def stock_card(info, ticker):
-    p=info.get("price",0); chg=info.get("change",0); pct=info.get("pct",0)
-    name=info.get("name",ticker); tgt=info.get("target"); lo52=info.get("lo52"); hi52=info.get("hi52")
-    nextER=info.get("nextER","—"); exch=info.get("exchange",""); sec=info.get("sector","")
+    p=float(info.get("price") or 0)
+    chg=float(info.get("change") or 0)
+    pct=float(info.get("pct") or 0)
+    name=str(info.get("name") or ticker)
+    tgt=info.get("target"); lo52=info.get("lo52"); hi52=info.get("hi52")
+    nextER=str(info.get("nextER") or "—")
+    exch=str(info.get("exchange") or ""); sec=str(info.get("sector") or "")
     cc="#F85149"if chg<0 else"#3FB950"
-    up=round((tgt-p)/p*100,1)if tgt and p else None; uc="#3FB950"if up and up>=0 else"#F85149"
-    bar=round((p-lo52)/(hi52-lo52)*100)if lo52 and hi52 and hi52>lo52 else 50
+    up=round((float(tgt)-p)/p*100,1)if tgt and p else None
+    uc="#3FB950"if up is not None and up>=0 else"#F85149"
+    lo52f=float(lo52) if lo52 else None; hi52f=float(hi52) if hi52 else None
+    bar=round((p-lo52f)/(hi52f-lo52f)*100)if lo52f and hi52f and hi52f>lo52f else 50
     bar=max(0,min(100,bar))
     tgt_html=f'<div style="background:#1C2128;border-radius:9px;padding:7px 10px;display:flex;justify-content:space-between;align-items:center"><span style="font-size:10px;color:#8B949E;font-weight:600">分析師目標</span><div><span style="font-size:11px;font-weight:700">${tgt:.2f}</span><span style="font-size:10px;color:{uc};margin-left:4px;font-weight:600">{"+" if up and up>=0 else""}{up:.1f}%</span></div></div>'if tgt else""
-    rng_html=f'<div style="background:#1C2128;border-radius:9px;padding:7px 10px;display:flex;justify-content:space-between;align-items:center"><span style="font-size:10px;color:#8B949E;font-weight:600">52週區間</span><div style="text-align:right"><span style="font-size:11px;font-weight:700">{lo52:.0f}–{hi52:.0f}</span><div style="background:#21262D;border-radius:100px;height:3px;margin-top:3px;width:56px;position:relative;margin-left:auto"><div style="position:absolute;left:{bar}%;top:-2px;width:7px;height:7px;background:#1F6FEB;border-radius:50%;transform:translateX(-50%)"></div></div></div></div>'if lo52 and hi52 else""
-    badges="".join([f'<span style="font-size:10px;background:#21262D;color:#8B949E;padding:2px 6px;border-radius:4px">{x}</span>'for x in[exch,sec]if x])
+    rng_html=f'<div style="background:#1C2128;border-radius:9px;padding:7px 10px;display:flex;justify-content:space-between;align-items:center"><span style="font-size:10px;color:#8B949E;font-weight:600">52週區間</span><div style="text-align:right"><span style="font-size:11px;font-weight:700">{lo52f:.0f}–{hi52f:.0f}</span><div style="background:#21262D;border-radius:100px;height:3px;margin-top:3px;width:56px;position:relative;margin-left:auto"><div style="position:absolute;left:{bar}%;top:-2px;width:7px;height:7px;background:#1F6FEB;border-radius:50%;transform:translateX(-50%)"></div></div></div></div>'if lo52f and hi52f else""
+    badges="".join([f'<span style="font-size:10px;background:#21262D;color:#8B949E;padding:2px 6px;border-radius:4px">{str(x)}</span>'for x in[exch,sec]if x and str(x).strip()])
     st.markdown(f'''<div style="background:#161B22;border:1px solid #30363D;border-radius:14px;padding:14px;margin-bottom:12px">
       <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px">
         <div style="display:flex;gap:10px;align-items:center">
