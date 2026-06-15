@@ -421,10 +421,16 @@ with tab1:
     if calls_d or puts_d:
         cur = info.get("price", 0)
         if cur > 0:
-            calls_f = sorted([r for r in calls_d if cur*0.75 <= r["k"] <= cur*1.25], key=lambda r:r["k"])
-            puts_f  = sorted([r for r in puts_d  if cur*0.75 <= r["k"] <= cur*1.25], key=lambda r:r["k"])
+            calls_f = sorted([r for r in calls_d if cur*0.75 <= r["k"] <= cur*1.25 and (r["bid"] > 0 or r["ask"] > 0)], key=lambda r:r["k"])
+            puts_f  = sorted([r for r in puts_d  if cur*0.75 <= r["k"] <= cur*1.25 and (r["bid"] > 0 or r["ask"] > 0)], key=lambda r:r["k"])
+            # fallback if too few results
+            if len(calls_f) < 3:
+                calls_f = sorted([r for r in calls_d if cur*0.75 <= r["k"] <= cur*1.25], key=lambda r:r["k"])
+            if len(puts_f) < 3:
+                puts_f = sorted([r for r in puts_d if cur*0.75 <= r["k"] <= cur*1.25], key=lambda r:r["k"])
         else:
-            calls_f = calls_d[:30]; puts_f = puts_d[:30]
+            calls_f = [r for r in calls_d if r["bid"] > 0 or r["ask"] > 0][:30]
+            puts_f  = [r for r in puts_d  if r["bid"] > 0 or r["ask"] > 0][:30]
 
         # Pass data to HTML component as JSON
         data_js = _json.dumps({
@@ -740,8 +746,7 @@ render();
 """
         component_html = component_html.replace("__DATA_PLACEHOLDER__", data_js)
         st.caption(f"載入 {len(calls_f)} Call / {len(puts_f)} Put 行權價")
-        if calls_f:
-            st.caption(f"第一筆資料: {calls_f[0]}")
+
         components.html(component_html, height=900, scrolling=True)
 
 # ══════ TAB 2 ══════
