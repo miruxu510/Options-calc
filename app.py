@@ -740,6 +740,8 @@ render();
 """
         component_html = component_html.replace("__DATA_PLACEHOLDER__", data_js)
         st.caption(f"載入 {len(calls_f)} Call / {len(puts_f)} Put 行權價")
+        if calls_f:
+            st.caption(f"第一筆資料: {calls_f[0]}")
         components.html(component_html, height=900, scrolling=True)
 
 # ══════ TAB 2 ══════
