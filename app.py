@@ -332,38 +332,82 @@ def show_result(sk,bK,bP,sK,sP,maxP,maxL,be,cur):
     st.markdown(make_ladder(sk,bK,bP,sK,sP,maxL,be,cur), unsafe_allow_html=True)
 
 def stock_card(info, ticker):
-    p=float(info.get("price") or 0)
-    chg=float(info.get("change") or 0)
-    pct=float(info.get("pct") or 0)
-    name=str(info.get("name") or ticker)
-    tgt=info.get("target"); lo52=info.get("lo52"); hi52=info.get("hi52")
-    nextER=str(info.get("nextER") or "—")
-    exch=str(info.get("exchange") or ""); sec=str(info.get("sector") or "")
-    cc="#F85149"if chg<0 else"#3FB950"
-    up=round((float(tgt)-p)/p*100,1)if tgt and p else None
-    uc="#3FB950"if up is not None and up>=0 else"#F85149"
-    lo52f=float(lo52) if lo52 else None; hi52f=float(hi52) if hi52 else None
-    bar=round((p-lo52f)/(hi52f-lo52f)*100)if lo52f and hi52f and hi52f>lo52f else 50
-    bar=max(0,min(100,bar))
-    tgt_html=f'<div style="background:#1C2128;border-radius:9px;padding:7px 10px;display:flex;justify-content:space-between;align-items:center"><span style="font-size:10px;color:#8B949E;font-weight:600">分析師目標</span><div><span style="font-size:11px;font-weight:700">${tgt:.2f}</span><span style="font-size:10px;color:{uc};margin-left:4px;font-weight:600">{"+" if up and up>=0 else""}{up:.1f}%</span></div></div>'if tgt else""
-    rng_html=f'<div style="background:#1C2128;border-radius:9px;padding:7px 10px;display:flex;justify-content:space-between;align-items:center"><span style="font-size:10px;color:#8B949E;font-weight:600">52週區間</span><div style="text-align:right"><span style="font-size:11px;font-weight:700">{lo52f:.0f}–{hi52f:.0f}</span><div style="background:#21262D;border-radius:100px;height:3px;margin-top:3px;width:56px;position:relative;margin-left:auto"><div style="position:absolute;left:{bar}%;top:-2px;width:7px;height:7px;background:#1F6FEB;border-radius:50%;transform:translateX(-50%)"></div></div></div></div>'if lo52f and hi52f else""
-    badges="".join([f'<span style="font-size:10px;background:#21262D;color:#8B949E;padding:2px 6px;border-radius:4px">{str(x)}</span>'for x in[exch,sec]if x and str(x).strip()])
-    st.markdown(f'''<div style="background:#161B22;border:1px solid #30363D;border-radius:14px;padding:14px;margin-bottom:12px">
-      <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px">
-        <div style="display:flex;gap:10px;align-items:center">
-          <div style="width:40px;height:40px;background:#1F6FEB;border-radius:9px;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:800;color:#fff;flex-shrink:0">{ticker}</div>
-          <div><div style="font-size:13px;font-weight:700">{name}</div><div style="display:flex;gap:5px;margin-top:3px;flex-wrap:wrap">{badges}</div></div>
-        </div>
-        <div style="text-align:right;flex-shrink:0">
-          <div style="font-size:22px;font-weight:900;letter-spacing:-.5px">${p:.2f}</div>
-          <div style="font-size:12px;color:{cc};font-weight:600">{chg:+.2f} ({pct:+.2f}%)</div>
-        </div>
-      </div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">
-        {tgt_html}{rng_html}
-        <div style="background:#1C2128;border-radius:9px;padding:7px 10px;display:flex;justify-content:space-between;align-items:center"><span style="font-size:10px;color:#8B949E;font-weight:600">下一財報</span><span style="font-size:11px;font-weight:700;color:#F79000">{nextER}</span></div>
-        <div style="background:#1C2128;border-radius:9px;padding:7px 10px;display:flex;justify-content:space-between;align-items:center"><span style="font-size:10px;color:#8B949E;font-weight:600">即時連線</span><span style="font-size:11px;font-weight:700;color:#3FB950">● 已連線</span></div>
-      </div></div>''', unsafe_allow_html=True)
+    p     = float(info.get("price") or 0)
+    chg   = float(info.get("change") or 0)
+    pct   = float(info.get("pct") or 0)
+    name  = str(info.get("name") or ticker)
+    tgt   = info.get("target")
+    lo52  = info.get("lo52")
+    hi52  = info.get("hi52")
+    nextER= str(info.get("nextER") or "—")
+    exch  = str(info.get("exchange") or "")
+    sec   = str(info.get("sector") or "")
+    cc    = "#F85149" if chg < 0 else "#3FB950"
+    up    = round((float(tgt)-p)/p*100,1) if tgt and p else None
+    uc    = "#3FB950" if up is not None and up >= 0 else "#F85149"
+    lo52f = float(lo52) if lo52 else None
+    hi52f = float(hi52) if hi52 else None
+    bar   = max(0, min(100, round((p-lo52f)/(hi52f-lo52f)*100))) if lo52f and hi52f and hi52f > lo52f else 50
+
+    # Build each piece safely with string concat (avoids f-string triple-quote conflicts)
+    badges = "".join(
+        '<span style="font-size:10px;background:#21262D;color:#8B949E;padding:2px 6px;border-radius:4px;margin-right:4px">' + str(x) + '</span>'
+        for x in [exch, sec] if x and str(x).strip()
+    )
+
+    tgt_cell = ""
+    if tgt:
+        up_sign = "+" if up and up >= 0 else ""
+        up_str  = (up_sign + str(up) + "%") if up is not None else ""
+        tgt_cell = (
+            '<div style="background:#1C2128;border-radius:9px;padding:7px 10px;display:flex;justify-content:space-between;align-items:center">'
+            '<span style="font-size:10px;color:#8B949E;font-weight:600">分析師目標</span>'
+            '<div><span style="font-size:11px;font-weight:700">$' + f"{float(tgt):.2f}" + '</span>'
+            '<span style="font-size:10px;color:' + uc + ';margin-left:4px;font-weight:600">' + up_str + '</span></div></div>'
+        )
+
+    rng_cell = ""
+    if lo52f and hi52f:
+        rng_cell = (
+            '<div style="background:#1C2128;border-radius:9px;padding:7px 10px;display:flex;justify-content:space-between;align-items:center">'
+            '<span style="font-size:10px;color:#8B949E;font-weight:600">52週區間</span>'
+            '<div style="text-align:right">'
+            '<span style="font-size:11px;font-weight:700">' + f"{lo52f:.0f}" + '–' + f"{hi52f:.0f}" + '</span>'
+            '<div style="background:#21262D;border-radius:100px;height:3px;margin-top:3px;width:56px;position:relative;margin-left:auto">'
+            '<div style="position:absolute;left:' + str(bar) + '%;top:-2px;width:7px;height:7px;background:#1F6FEB;border-radius:50%;transform:translateX(-50%)"></div>'
+            '</div></div></div>'
+        )
+
+    er_cell = (
+        '<div style="background:#1C2128;border-radius:9px;padding:7px 10px;display:flex;justify-content:space-between;align-items:center">'
+        '<span style="font-size:10px;color:#8B949E;font-weight:600">下一財報</span>'
+        '<span style="font-size:11px;font-weight:700;color:#F79000">' + nextER + '</span></div>'
+    )
+
+    live_cell = (
+        '<div style="background:#1C2128;border-radius:9px;padding:7px 10px;display:flex;justify-content:space-between;align-items:center">'
+        '<span style="font-size:10px;color:#8B949E;font-weight:600">即時連線</span>'
+        '<span style="font-size:11px;font-weight:700;color:#3FB950">● 已連線</span></div>'
+    )
+
+    html = (
+        '<div style="background:#161B22;border:1px solid #30363D;border-radius:14px;padding:14px;margin-bottom:12px">'
+        '<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px">'
+        '<div style="display:flex;gap:10px;align-items:center">'
+        '<div style="width:40px;height:40px;background:#1F6FEB;border-radius:9px;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:800;color:#fff;flex-shrink:0">' + ticker + '</div>'
+        '<div><div style="font-size:13px;font-weight:700">' + name + '</div>'
+        '<div style="display:flex;gap:5px;margin-top:3px;flex-wrap:wrap">' + badges + '</div></div>'
+        '</div>'
+        '<div style="text-align:right;flex-shrink:0">'
+        '<div style="font-size:22px;font-weight:900;letter-spacing:-.5px">$' + f"{p:.2f}" + '</div>'
+        '<div style="font-size:12px;color:' + cc + ';font-weight:600">' + f"{chg:+.2f}" + ' (' + f"{pct:+.2f}" + '%)</div>'
+        '</div></div>'
+        '<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">'
+        + tgt_cell + rng_cell + er_cell + live_cell +
+        '</div></div>'
+    )
+    st.markdown(html, unsafe_allow_html=True)
+
 
 # ── local storage ─────────────────────────────────────
 if HAS_LS:
