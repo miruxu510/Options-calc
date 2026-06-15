@@ -498,7 +498,7 @@ select{-webkit-appearance:none;appearance:none;background:#1C2128;border:1px sol
 <div id="app"></div>
 
 <script>
-const DATA = JSON.parse(''' + data_js + ''');
+const DATA = __DATA_PLACEHOLDER__;
 const CALLS = DATA.calls;
 const PUTS  = DATA.puts;
 const CUR   = DATA.cur;
@@ -738,7 +738,9 @@ function doCalc(){
 render();
 </script>
 """
-        components.html(component_html, height=600, scrolling=True)
+        component_html = component_html.replace("__DATA_PLACEHOLDER__", data_js)
+        st.caption(f"載入 {len(calls_f)} Call / {len(puts_f)} Put 行權價")
+        components.html(component_html, height=900, scrolling=True)
 
 # ══════ TAB 2 ══════
 with tab2:
