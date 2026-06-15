@@ -390,112 +390,344 @@ tab1,tab2,tab3,tab4=st.tabs(["選股計算","AI 掃描","我的組合","說明"]
 
 # ══════ TAB 1 ══════
 with tab1:
-    st.markdown('<div style="padding:12px 16px 0">',unsafe_allow_html=True)
+    import streamlit.components.v1 as components
+    import json as _json
 
-    # Watchlist — horizontal scroll chips using HTML
-    WATCHLIST=["MU","NVDA","ORCL","DKNG","AAPL","TSLA","AMZN","MSFT","IBIT","SRAD","FLUT","META"]
-    chip_style="display:inline-block;background:#1C2128;border:1px solid #30363D;border-radius:100px;padding:5px 12px;color:#8B949E;font-size:12px;font-weight:700;margin:2px;cursor:pointer;text-decoration:none;white-space:nowrap"
-    chips="".join(f'<a href="?t={t}" style="{chip_style}">{t}</a>' for t in WATCHLIST)
-    st.markdown(f'<div style="overflow-x:auto;white-space:nowrap;margin-bottom:10px;padding-bottom:4px">{chips}</div>',unsafe_allow_html=True)
+    # ── Watchlist chips ──
+    WATCHLIST = ["MU","NVDA","ORCL","DKNG","AAPL","TSLA","AMZN","MSFT","IBIT","SRAD","FLUT","META"]
+    chip_s = "display:inline-block;background:#1C2128;border:1px solid #30363D;border-radius:100px;padding:5px 12px;color:#8B949E;font-size:12px;font-weight:700;margin:2px;text-decoration:none;white-space:nowrap"
+    chips = "".join(f'<a href="?t={t}" style="{chip_s}">{t}</a>' for t in WATCHLIST)
+    st.markdown(f'<div style="overflow-x:auto;white-space:nowrap;padding:12px 16px 4px">{chips}</div>', unsafe_allow_html=True)
 
-    # Read ticker from query params (set by chip click)
-    qp=st.query_params
-    default_ticker=qp.get("t","").upper()
+    # ── Ticker + Expiry ──
+    qp = st.query_params
+    default_t = qp.get("t","").upper()
+    c1,c2 = st.columns([2,1])
+    ticker = c1.text_input("股票代號", placeholder="MU / ORCL / DKNG", key="tk", value=default_t).upper().strip()
+    expiries = get_expiries(ticker) if ticker else []
+    expiry = c2.selectbox("到期日", expiries if expiries else ["—"], key="exp") if expiries else None
 
-    c1,c2=st.columns([2,1])
-    ticker=c1.text_input("股票代號",placeholder="MU / ORCL / DKNG",key="tk",value=default_ticker).upper().strip()
-    expiries=get_expiries(ticker)if ticker else[]
-    expiry=c2.selectbox("到期日",expiries if expiries else["—"],key="exp")if expiries else None
-
-    info={}; calls_d,puts_d=[],[]
+    info = {}; calls_d=[]; puts_d=[]
     if ticker:
         with st.spinner("載入中..."):
-            info=get_info(ticker)
+            info = get_info(ticker)
         if info.get("price"):
-            stock_card(info,ticker)
-            if expiry and expiry!="—":
-                calls_d,puts_d=get_chain(ticker,expiry)
+            stock_card(info, ticker)
+            if expiry and expiry != "—":
+                calls_d, puts_d = get_chain(ticker, expiry)
         elif ticker:
-            st.error(f"找不到 {ticker} 的資料")
+            st.error(f"找不到 {ticker}")
 
     if calls_d or puts_d:
-        cur=info.get("price",0)
-        # Filter: ±25% of current price, sorted by proximity
-        if cur>0:
-            calls_f=sorted([r for r in calls_d if cur*0.75<=r["k"]<=cur*1.25],key=lambda r:r["k"])
-            puts_f=sorted([r for r in puts_d if cur*0.75<=r["k"]<=cur*1.25],key=lambda r:r["k"])
+        cur = info.get("price", 0)
+        if cur > 0:
+            calls_f = sorted([r for r in calls_d if cur*0.75 <= r["k"] <= cur*1.25], key=lambda r:r["k"])
+            puts_f  = sorted([r for r in puts_d  if cur*0.75 <= r["k"] <= cur*1.25], key=lambda r:r["k"])
         else:
-            calls_f=calls_d[:20]; puts_f=puts_d[:20]
+            calls_f = calls_d[:30]; puts_f = puts_d[:30]
 
-        STRAT_MAP={"看漲價差 Bull Call Spread":"bull","看跌價差 Bear Put Spread":"bear","單買 Call":"call","單買 Put":"put"}
-        TIPS={"bull":"買低Call賣高Call，看漲限風險，最大獲利固定。","bear":"買高Put賣低Put，看跌限風險，最大獲利固定。","call":"直接買入Call，無限獲利潛力，最多虧損全部權利金。","put":"直接買入Put，跌越多賺越多，最多虧損全部權利金。"}
+        # Pass data to HTML component as JSON
+        data_js = _json.dumps({
+            "cur": cur,
+            "calls": calls_f,
+            "puts":  puts_f,
+        })
 
-        # Strategy selector + tip inline
-        sk_lbl=st.selectbox("策略",list(STRAT_MAP.keys()),key="sk",label_visibility="collapsed")
-        sk=STRAT_MAP[sk_lbl]
+        html_h = 520  # component height, increases after calc
 
-        # Tip toggle
-        if "show_tip" not in st.session_state: st.session_state["show_tip"]=False
-        tip_cols=st.columns([5,1])
-        with tip_cols[1]:
-            st.markdown(f'''<div style="text-align:right;margin-top:-10px">
-              <span onclick="void(0)" style="background:#0C2D6B;border:1px solid #1F6FEB;border-radius:8px;padding:5px 10px;color:#1F6FEB;font-size:11px;font-weight:600;cursor:pointer;display:inline-block">ⓘ</span>
-            </div>''',unsafe_allow_html=True)
-        if st.session_state.get("show_tip"):
-            st.markdown(f'<div style="background:#0C2D6B;border:1px solid #1F6FEB;border-radius:10px;padding:10px 14px;margin-bottom:8px;font-size:12px;color:#8B949E">{TIPS[sk]}</div>',unsafe_allow_html=True)
+        component_html = """
+<style>
+*{box-sizing:border-box;margin:0;padding:0;font-family:Inter,-apple-system,sans-serif}
+body{background:transparent;color:#E6EDF3;padding:0 16px 16px}
+select{-webkit-appearance:none;appearance:none;background:#1C2128;border:1px solid #30363D;border-radius:10px;color:#E6EDF3;font-size:14px;font-weight:700;width:100%;padding:10px 14px;cursor:pointer}
+.strat-box{background:#1C2128;border:1px solid #30363D;border-radius:12px;padding:12px 14px;margin-bottom:10px;display:flex;align-items:center;gap:10px}
+.strat-box select{flex:1;border:none;background:transparent;font-size:14px;padding:0}
+.tip-btn{background:#0C2D6B;border:1px solid #1F6FEB;border-radius:8px;padding:6px 10px;color:#1F6FEB;font-size:11px;font-weight:700;cursor:pointer;white-space:nowrap;flex-shrink:0}
+.tip-box{background:#0C2D6B;border:1px solid #1F6FEB;border-radius:10px;padding:10px 14px;margin-bottom:10px;font-size:12px;color:#8B949E;line-height:1.6;display:none}
+.legs{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px}
+.leg{border-radius:14px;padding:12px}
+.leg.buy{background:#0C2D6B;border:1.5px solid #1F6FEB}
+.leg.sell{background:#0D4429;border:1.5px solid #1A6B36}
+.leg.single-call{background:#0C2D6B;border:1.5px solid #1F6FEB}
+.leg.single-put{background:#3D2400;border:1.5px solid #F79000}
+.leg-title{font-size:11px;font-weight:700;margin-bottom:8px}
+.leg.buy .leg-title,.leg.single-call .leg-title{color:#1F6FEB}
+.leg.sell .leg-title{color:#3FB950}
+.leg.single-put .leg-title{color:#F79000}
+.leg-label{font-size:10px;color:#8B949E;margin-bottom:4px}
+.prem{font-size:22px;font-weight:900;color:#E6EDF3;margin-top:6px}
+.prem-label{font-size:10px;color:#8B949E;margin-top:6px;margin-bottom:2px}
+.qty-row{display:flex;align-items:center;justify-content:space-between;margin-top:10px}
+.qty-label{font-size:10px;color:#8B949E}
+.qty-ctrl{display:flex;align-items:center;gap:8px}
+.qty-btn{width:28px;height:28px;background:#21262D;border:1px solid #30363D;border-radius:7px;color:#E6EDF3;font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.qty-val{font-size:14px;font-weight:700;min-width:20px;text-align:center}
+.qty-unit{font-size:12px;color:#8B949E}
+.swap-btn{width:100%;background:#1C2128;border:1px solid #30363D;border-radius:10px;padding:9px 0;color:#8B949E;font-size:13px;cursor:pointer;margin-bottom:10px}
+.calc-btn{width:100%;background:linear-gradient(135deg,#1F6FEB,#0C54C7);border:none;border-radius:14px;padding:17px 0;color:#fff;font-size:16px;font-weight:800;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:10px;margin-bottom:14px}
+.metrics{display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:6px;margin-bottom:12px}
+.metric{border-radius:10px;padding:10px 8px}
+.metric.g{background:#0D4429;border:1.5px solid #1A6B36}
+.metric.r{background:#4A1015;border:1.5px solid #8B1A1A}
+.metric.gr{background:#1C2128;border:1.5px solid #30363D}
+.metric.p{background:#2D1F52;border:1.5px solid #6E40C9}
+.mlabel{font-size:9px;font-weight:700;margin-bottom:3px;letter-spacing:.5px}
+.metric.g .mlabel{color:#86EFAC}.metric.r .mlabel{color:#FCA5A5}.metric.gr .mlabel{color:#8B949E}.metric.p .mlabel{color:#C4B5FD}
+.mval{font-size:15px;font-weight:900;letter-spacing:-.5px}
+.metric.g .mval{color:#4ADE80}.metric.r .mval{color:#F87171}.metric.gr .mval{color:#E6EDF3}.metric.p .mval{color:#A78BFA}
+.msub{font-size:9px;font-weight:600;margin-top:1px}
+.metric.g .msub{color:#4ADE80}.metric.r .msub{color:#F87171}
+.result-box{background:#161B22;border:1px solid #30363D;border-radius:14px;padding:14px}
+.rtitle{font-size:14px;font-weight:700;margin-bottom:12px}
+.ladder{background:#1C2128;border-radius:12px;overflow:hidden;margin-top:12px}
+.lhdr{padding:8px 12px;display:flex;justify-content:space-between;border-bottom:1px solid #30363D}
+.lhdr-l{font-size:10px;color:#8B949E;font-weight:700;text-transform:uppercase;letter-spacing:1px}
+.lhdr-r{font-size:10px;color:#484F58;background:#21262D;padding:1px 8px;border-radius:100px}
+.lcols{display:grid;grid-template-columns:1fr 1fr 1fr;background:#21262D;padding:5px 12px;border-bottom:1px solid #30363D}
+.lch{font-size:9px;color:#484F58;font-weight:700;text-transform:uppercase;letter-spacing:.5px}
+.lch:not(:first-child){text-align:right}
+.lrow{display:grid;grid-template-columns:1fr 1fr 1fr;padding:6px 12px;border-bottom:1px solid #161B22}
+.lp{font-size:12px;color:#E6EDF3;font-weight:500;display:flex;align-items:center;gap:4px}
+.lv,.lr{font-size:12px;font-weight:600;text-align:right}
+.tag{font-size:8px;padding:1px 5px;border-radius:100px;font-weight:700}
+.tbe{background:#1A1000;color:#F0B429}
+.tmax{background:#0D2010;color:#4ADE80}
+.save-btn{width:100%;margin-top:10px;padding:10px 0;background:transparent;border:1px solid #F0B429;border-radius:100px;color:#F0B429;font-size:13px;font-weight:700;cursor:pointer}
+</style>
 
-        arr_b=calls_f if sk in("bull","call") else puts_f
-        arr_s=calls_f if sk=="bull" else puts_f if sk=="bear" else[]
-        opts_b={f"${r['k']:.0f} · Ask ${r['ask']:.2f}":r for r in arr_b}
-        opts_s={f"${r['k']:.0f} · Bid ${r['bid']:.2f}":r for r in arr_s} if arr_s else{}
+<div id="app"></div>
 
-        # Leg UI — colored expanders to simulate cards
-        if sk in("bull","bear"):
-            b_lbl="買入 Call"if sk=="bull"else"買入 Put"
-            s_lbl="賣出 Call"if sk=="bull"else"賣出 Put"
-            # Blue card: buy leg
-            st.markdown(f'<div style="background:#0C2D6B;border:1.5px solid #1F6FEB;border-radius:14px;padding:12px 14px;margin:8px 0 4px"><div style="font-size:11px;font-weight:700;color:#1F6FEB;margin-bottom:8px">{b_lbl} (Long)</div></div>',unsafe_allow_html=True)
-            sel_b=st.selectbox("買入",["請選擇"]+list(opts_b.keys()),key="selb",label_visibility="collapsed")
-            bR=opts_b.get(sel_b)
-            if bR:
-                st.markdown(f'<div style="background:#0C2D6B;border-radius:0 0 10px 10px;padding:2px 14px 10px;margin-top:-8px;margin-bottom:8px"><div style="font-size:10px;color:#60A5FA;margin-bottom:2px">Ask 權利金</div><div style="font-size:24px;font-weight:900;color:#E6EDF3">${bR["ask"]:.2f}</div></div>',unsafe_allow_html=True)
-            # Green card: sell leg
-            st.markdown(f'<div style="background:#0D4429;border:1.5px solid #1A6B36;border-radius:14px;padding:12px 14px;margin:8px 0 4px"><div style="font-size:11px;font-weight:700;color:#3FB950;margin-bottom:8px">{s_lbl} (Short)</div></div>',unsafe_allow_html=True)
-            sel_s=st.selectbox("賣出",["請選擇"]+list(opts_s.keys()),key="sels",label_visibility="collapsed")
-            sR=opts_s.get(sel_s)
-            if sR:
-                st.markdown(f'<div style="background:#0D4429;border-radius:0 0 10px 10px;padding:2px 14px 10px;margin-top:-8px;margin-bottom:8px"><div style="font-size:10px;color:#4ADE80;margin-bottom:2px">Bid 權利金</div><div style="font-size:24px;font-weight:900;color:#E6EDF3">${sR["bid"]:.2f}</div></div>',unsafe_allow_html=True)
-        else:
-            b_lbl="買入 Call"if sk=="call"else"買入 Put"
-            bc="#1F6FEB"if sk=="call"else"#F79000"
-            bbg="#0C2D6B"if sk=="call"else"#3D2400"
-            bbd="#1F6FEB"if sk=="call"else"#F79000"
-            st.markdown(f'<div style="background:{bbg};border:1.5px solid {bbd};border-radius:14px;padding:12px 14px;margin:8px 0 4px"><div style="font-size:11px;font-weight:700;color:{bc};margin-bottom:8px">{b_lbl} (Long)</div></div>',unsafe_allow_html=True)
-            sel_b=st.selectbox("行權價",["請選擇"]+list(opts_b.keys()),key="selb",label_visibility="collapsed")
-            bR=opts_b.get(sel_b)
-            if bR:
-                st.markdown(f'<div style="background:{bbg};border-radius:0 0 10px 10px;padding:2px 14px 10px;margin-top:-8px;margin-bottom:8px"><div style="font-size:10px;color:{bc};margin-bottom:2px">Ask 權利金</div><div style="font-size:24px;font-weight:900;color:#E6EDF3">${bR["ask"]:.2f}</div></div>',unsafe_allow_html=True)
-            sel_s="請選擇"; sR=None
+<script>
+const DATA = """ + data_js + """;
+const CALLS = DATA.calls;
+const PUTS  = DATA.puts;
+const CUR   = DATA.cur;
 
-        st.markdown("<br>",unsafe_allow_html=True)
-        if st.button("計算損益",key="calc"):
-            bR=opts_b.get(st.session_state.get("selb",""))
-            sR=opts_s.get(st.session_state.get("sels",""))if sk in("bull","bear")else None
-            if not bR: st.error("請選擇買入行權價")
-            elif sk in("bull","bear")and not sR: st.error("請選擇賣出行權價")
-            else:
-                bK=bR["k"];bP=bR["ask"]
-                sK=sR["k"]if sR else 0;sP=sR["bid"]if sR else 0
-                if sk=="bull": nc=bP-sP;maxP=(sK-bK-nc)*100;maxL=nc*100;be=bK+nc
-                elif sk=="bear": nc=bP-sP;maxP=(bK-sK-nc)*100;maxL=nc*100;be=bK-nc
-                elif sk=="call": maxP=None;maxL=bP*100;be=bK+bP
-                else: maxP=None;maxL=bP*100;be=bK-bP
-                show_result(sk,bK,bP,sK,sP,maxP,maxL,be,cur)
-                if st.button("⭐ 收藏",key="fav_c"):
-                    add_fav({"sk":sk,"ticker":ticker,"expiry":expiry,"currentPrice":cur,"bK":bK,"bP":bP,"sK":sK,"sP":sP,"maxProfit":maxP,"maxLoss":maxL,"breakeven":be})
-                    st.success("已收藏！")
+const STRATS = {
+  bull:{label:"看漲價差 Bull Call Spread",tip:"買低Call賣高Call，看漲限風險，最大獲利固定。"},
+  bear:{label:"看跌價差 Bear Put Spread", tip:"買高Put賣低Put，看跌限風險，最大獲利固定。"},
+  call:{label:"單買 Call (Long Call)",    tip:"直接買入Call，無限獲利潛力，最多虧損全部權利金。"},
+  put: {label:"單買 Put (Long Put)",      tip:"直接買入Put，跌越多賺越多，最多虧損全部權利金。"},
+};
 
-    st.markdown('</div>',unsafe_allow_html=True)
+let sk="bull", tipOpen=false, result=null;
+let bSel="", sSel="", bQty=1, sQty=1;
+
+function pnl(sk,bK,bP,sK,sP,price){
+  if(sk==="bull"){const nc=bP-sP;if(price<=bK)return -nc*100;if(price>=sK)return(sK-bK-nc)*100;return(price-bK-nc)*100;}
+  if(sk==="bear"){const nc=bP-sP;if(price>=bK)return -nc*100;if(price<=sK)return(bK-sK-nc)*100;return(bK-price-nc)*100;}
+  if(sk==="call")return(Math.max(price-bK,0)-bP)*100;
+  if(sk==="put") return(Math.max(bK-price,0)-bP)*100;
+  return 0;
+}
+
+function findBE(sk,bK,bP,sK,sP){
+  const lo=Math.min(bK,sK||bK,CUR)*0.75,hi=Math.max(bK,sK||bK,CUR)*1.35;
+  let prev=pnl(sk,bK,bP,sK,sP,lo);
+  for(let i=1;i<=600;i++){
+    const p=lo+(hi-lo)*i/600,c=pnl(sk,bK,bP,sK,sP,p);
+    if((prev<=0&&c>0)||(prev>=0&&c<0)){const f=Math.abs(prev)/(Math.abs(prev)+Math.abs(c));return lo+(hi-lo)*(i-1+f)/600;}
+    prev=c;
+  }
+  return null;
+}
+
+function makeSVG(sk,bK,bP,sK,sP){
+  const unlimited=sk==="call"||sk==="put",profR=sk==="bull"||sk==="call";
+  const be=findBE(sk,bK,bP,sK,sP);
+  const allk=[bK,CUR,...(sK?[sK]:[]),...(be?[be]:[])];
+  const center=be||CUR,span=Math.max(Math.max(...allk)-Math.min(...allk),CUR*0.16)*1.5;
+  const lo=center-span*0.55,hi=center+span*0.55;
+  const pts=Array.from({length:201},(_,i)=>lo+(hi-lo)*i/200);
+  const pnls=pts.map(p=>pnl(sk,bK,bP,sK,sP,p));
+  const maxV=Math.max(...pnls),minV=Math.min(...pnls);
+  if(maxV===minV)return "";
+  const W=340,H=220,pX=12,pTop=24,pBot=8,lH=32,pH=H-pTop-pBot-lH;
+  const vpad=(maxV-minV)*0.18,vT=maxV+vpad,vR=(vT-(minV-vpad))||1;
+  const cx=p=>pX+((p-lo)/(hi-lo))*(W-2*pX);
+  const cy=v=>pTop+(vT-v)/vR*pH;
+  const zY=cy(0);
+  const ld=pts.map((p,i)=>(i?"L":"M")+cx(p).toFixed(1)+","+cy(pnls[i]).toFixed(1)).join(" ");
+  const fd=ld+" L"+cx(hi).toFixed(1)+","+zY.toFixed(1)+" L"+cx(lo).toFixed(1)+","+zY.toFixed(1)+" Z";
+  const tks=Array.from({length:6},(_,i)=>{const p=lo+(hi-lo)*i/5,tx=cx(p);return`<line x1="${tx.toFixed(1)}" y1="${zY.toFixed(1)}" x2="${tx.toFixed(1)}" y2="${(zY+4).toFixed(1)}" stroke="#444" stroke-width=".8"/><text x="${tx.toFixed(1)}" y="${(zY+13).toFixed(1)}" fill="#444" font-size="7.5" text-anchor="middle">$${p.toFixed(0)}</text>`;}).join("");
+  const cl=lo<CUR&&CUR<hi?`<line x1="${cx(CUR).toFixed(1)}" y1="${pTop}" x2="${cx(CUR).toFixed(1)}" y2="${H-pBot-lH}" stroke="#1F6FEB" stroke-width="1" stroke-dasharray="4 3" opacity=".5"/><text x="${cx(CUR).toFixed(1)}" y="${pTop-4}" fill="#1F6FEB" font-size="9" text-anchor="middle" font-weight="600">現價 $${CUR}</text>`:"";
+  const dots=[[bK,true],...(sK?[[sK,false]]:[])].map(([dk,buy])=>{
+    if(dk<lo||dk>hi)return"";
+    const mc=buy?"#60A5FA":"#FB923C",dy=cy(pnl(sk,bK,bP,sK,sP,dk)),sx=cx(dk);
+    const ab=dy>H*.45,by2=ab?dy-27:dy+11,lbl=(buy?"買入":"賣出")+" $"+dk;
+    return`<rect x="${(sx-34).toFixed(1)}" y="${by2.toFixed(1)}" width="68" height="14" rx="3" fill="#0A0A0A" opacity=".92"/><text x="${sx.toFixed(1)}" y="${(by2+11).toFixed(1)}" fill="${mc}" font-size="9" text-anchor="middle" font-weight="700">${lbl}</text><circle cx="${sx.toFixed(1)}" cy="${dy.toFixed(1)}" r="5" fill="${mc}"/><circle cx="${sx.toFixed(1)}" cy="${dy.toFixed(1)}" r="9" fill="${mc}" opacity=".18"/>`;
+  }).join("");
+  const beEl=be&&lo<be&&be<hi?`<rect x="${(cx(be)-36).toFixed(1)}" y="${(zY-32).toFixed(1)}" width="72" height="24" rx="4" fill="#0A0A0A" opacity=".92"/><text x="${cx(be).toFixed(1)}" y="${(zY-20).toFixed(1)}" fill="#F0B429" font-size="8" text-anchor="middle" font-weight="600">損益平衡</text><text x="${cx(be).toFixed(1)}" y="${(zY-9).toFixed(1)}" fill="#F0B429" font-size="10" text-anchor="middle" font-weight="800">$${be.toFixed(2)}</text><circle cx="${cx(be).toFixed(1)}" cy="${zY.toFixed(1)}" r="5" fill="#F0B429"/><circle cx="${cx(be).toFixed(1)}" cy="${zY.toFixed(1)}" r="9" fill="#F0B429" opacity=".22"/>`:"";
+  const bY=H-lH+13,bY2=H-lH+26;
+  const pX1=profR?W-pX-4:pX+4,pA1=profR?"end":"start";
+  const lX1=profR?pX+4:W-pX-4,lA1=profR?"start":"end";
+  const mpT=unlimited?"∞":("+$"+maxV.toFixed(0)),mlT="-$"+Math.abs(minV).toFixed(0);
+  const svg=document.createElementNS("http://www.w3.org/2000/svg","svg");
+  svg.setAttribute("viewBox","0 0 "+W+" "+H);
+  svg.style.cssText="width:100%;height:"+H+"px;display:block;background:#0D1117;border-radius:14px;margin-top:10px";
+  svg.innerHTML=`<defs><clipPath id="cp_p"><rect x="${pX}" y="${pTop}" width="${W-2*pX}" height="${Math.max(zY-pTop,0).toFixed(1)}"/></clipPath><clipPath id="cp_l"><rect x="${pX}" y="${zY.toFixed(1)}" width="${W-2*pX}" height="${Math.max(pH-(zY-pTop)+pBot+4,0).toFixed(1)}"/></clipPath></defs><line x1="${pX}" y1="${zY.toFixed(1)}" x2="${W-pX}" y2="${zY.toFixed(1)}" stroke="#2A2A2A" stroke-width="1" stroke-dasharray="4 3"/>${tks}${cl}<path d="${fd}" fill="#4ADE80" opacity=".18" clip-path="url(#cp_p)"/><path d="${fd}" fill="#F87171" opacity=".18" clip-path="url(#cp_l)"/><path d="${ld}" fill="none" stroke="#4ADE80" stroke-width="2.5" stroke-linejoin="round" clip-path="url(#cp_p)"/><path d="${ld}" fill="none" stroke="#F87171" stroke-width="2.5" stroke-linejoin="round" clip-path="url(#cp_l)"/>${dots}${beEl}<text x="${pX1}" y="${bY}" fill="#4ADE80" font-size="8" font-weight="700" text-anchor="${pA1}">最大獲利</text><text x="${pX1}" y="${bY2}" fill="#4ADE80" font-size="12" font-weight="800" text-anchor="${pA1}">${mpT}</text><text x="${lX1}" y="${bY}" fill="#F87171" font-size="8" font-weight="700" text-anchor="${lA1}">最大虧損</text><text x="${lX1}" y="${bY2}" fill="#F87171" font-size="12" font-weight="800" text-anchor="${lA1}">${mlT}</text>`;
+  return svg;
+}
+
+function makeLadder(sk,bK,bP,sK,sP,maxL,be){
+  const spread=sK?Math.abs(bK-sK):bP*5;
+  const step=spread<5?1:spread<=10?1:spread<=20?2.5:spread<=50?5:10;
+  const lo=Math.floor(Math.min(bK,sK||bK,CUR)*0.88/step)*step;
+  const hi=Math.ceil(Math.max(bK,sK||bK,CUR)*1.12/step)*step;
+  const allRows=[];
+  for(let p=lo;p<=hi+.001;p=Math.round((p+step)*1000)/1000){
+    const v=pnl(sk,bK,bP,sK,sP,p),ret=maxL?v/maxL*100:0;
+    const nb=be!=null&&Math.abs(p-be)<=step*.55;
+    const im=(sk==="bull"&&sK&&p>=sK)||(sk==="bear"&&sK&&p<=sK);
+    allRows.push({p,v,ret,nb,im});
+  }
+  let mi=0,mxi=allRows.length-1;
+  for(let i=1;i<allRows.length;i++){if(allRows[i].v!==allRows[0].v){mi=Math.max(0,i-1);break;}}
+  if(sK){for(let i=0;i<allRows.length;i++){if(allRows[i].im){mxi=Math.min(i+5,allRows.length-1);break;}}}
+  const rows=allRows.slice(mi,mxi+1);
+  const wrap=document.createElement("div"); wrap.className="ladder";
+  const ss=step%1===0?step.toFixed(0):step.toFixed(1);
+  wrap.innerHTML=`<div class="lhdr"><span class="lhdr-l">損益對照表</span><span class="lhdr-r">每 $${ss}</span></div><div class="lcols"><span class="lch">股價</span><span class="lch">損益/張</span><span class="lch">報酬率</span></div>`;
+  rows.forEach(r=>{
+    const col=r.v>0?"#4ADE80":r.v<0?"#F87171":"#F0B429";
+    const bg=r.v>1?"rgba(74,222,128,.05)":r.v<-1?"rgba(248,113,113,.05)":"rgba(240,180,41,.06)";
+    const row=document.createElement("div"); row.className="lrow"; row.style.background=bg;
+    const ps="$"+(r.p%1===0?r.p.toFixed(0):r.p.toFixed(2));
+    const tags=(r.nb?'<span class="tag tbe">平衡</span>':'')+(r.im?'<span class="tag tmax">MAX</span>':'');
+    const pstr=(r.v>=0?"+":"")+r.v.toFixed(0),rstr=(r.ret>=0?"+":"")+r.ret.toFixed(0)+"%";
+    row.innerHTML=`<span class="lp">${ps}${tags}</span><span class="lv" style="color:${col}">$${pstr}</span><span class="lr" style="color:${col}">${rstr}</span>`;
+    wrap.appendChild(row);
+  });
+  return wrap;
+}
+
+function getArr(){ return (sk==="bear"||sk==="put")?PUTS:CALLS; }
+function getSArr(){ return sk==="bear"?PUTS:sk==="bull"?CALLS:[]; }
+
+function render(){
+  const isSingle=sk==="call"||sk==="put";
+  const bArr=getArr(), sArr=getSArr();
+  const bRow=bArr.find(r=>r.k==bSel), sRow=sArr.find(r=>r.k==sSel);
+  const bL=sk==="bull"?"買入 Call":sk==="bear"?"買入 Put":sk==="call"?"買入 Call":"買入 Put";
+  const sL=sk==="bull"?"賣出 Call":"賣出 Put";
+  const bClass=sk==="put"?"leg single-put":"leg "+(isSingle?"single-call":"buy");
+
+  const app=document.getElementById("app"); app.innerHTML="";
+
+  // Strategy row
+  const stratDiv=document.createElement("div"); stratDiv.className="strat-box";
+  const stratSel=document.createElement("select"); stratSel.id="strat_sel";
+  Object.entries(STRATS).forEach(([k,v])=>{
+    const o=document.createElement("option"); o.value=k; o.textContent=v.label;
+    if(k===sk) o.selected=true; stratSel.appendChild(o);
+  });
+  stratSel.onchange=e=>{sk=e.target.value;bSel="";sSel="";result=null;render();};
+  const tipBtn=document.createElement("button"); tipBtn.className="tip-btn"; tipBtn.textContent="ⓘ 說明";
+  tipBtn.onclick=()=>{tipOpen=!tipOpen;document.getElementById("tip_box").style.display=tipOpen?"block":"none";};
+  stratDiv.appendChild(stratSel); stratDiv.appendChild(tipBtn); app.appendChild(stratDiv);
+
+  const tipBox=document.createElement("div"); tipBox.className="tip-box"; tipBox.id="tip_box";
+  tipBox.textContent=STRATS[sk].tip; tipBox.style.display=tipOpen?"block":"none"; app.appendChild(tipBox);
+
+  // Legs
+  const legsDiv=document.createElement("div"); legsDiv.className=isSingle?"":"legs"; app.appendChild(legsDiv);
+
+  function makeLegCard(arr,cls,title,selId,selVal,side,onchange){
+    const card=document.createElement("div"); card.className=cls;
+    const t=document.createElement("div"); t.className="leg-title"; t.textContent=title; card.appendChild(t);
+    const lb=document.createElement("div"); lb.className="leg-label"; lb.textContent="履約價 (Strike)"; card.appendChild(lb);
+    const sel=document.createElement("select"); sel.id=selId;
+    const opt0=document.createElement("option"); opt0.value=""; opt0.textContent="點此選擇行權價"; sel.appendChild(opt0);
+    arr.forEach(r=>{
+      const o=document.createElement("option"); o.value=r.k;
+      o.textContent="$"+r.k+(r.k%1===0?"":"")+"  ("+side+" $"+(side==="Ask"?r.ask.toFixed(2):r.bid.toFixed(2))+")";
+      if(r.k==selVal) o.selected=true; sel.appendChild(o);
+    });
+    sel.onchange=onchange; card.appendChild(sel);
+    const row=arr.find(r=>r.k==selVal);
+    if(row){
+      const pl=document.createElement("div"); pl.className="prem-label"; pl.textContent=side+" 權利金"; card.appendChild(pl);
+      const pv=document.createElement("div"); pv.className="prem"; pv.textContent="$"+(side==="Ask"?row.ask.toFixed(2):row.bid.toFixed(2)); card.appendChild(pv);
+    }
+    const qr=document.createElement("div"); qr.className="qty-row";
+    const ql=document.createElement("div"); ql.className="qty-label"; ql.textContent="數量";
+    const qc=document.createElement("div"); qc.className="qty-ctrl";
+    const qn=selId==="sel_b"?"bQty":"sQty";
+    const qm=document.createElement("button"); qm.className="qty-btn"; qm.textContent="−";
+    qm.onclick=()=>{if(selId==="sel_b"&&bQty>1)bQty--;else if(selId==="sel_s"&&sQty>1)sQty--;render();};
+    const qv=document.createElement("div"); qv.className="qty-val"; qv.textContent=selId==="sel_b"?bQty:sQty;
+    const qp2=document.createElement("button"); qp2.className="qty-btn"; qp2.textContent="+";
+    qp2.onclick=()=>{if(selId==="sel_b")bQty++;else sQty++;render();};
+    const qu=document.createElement("div"); qu.className="qty-unit"; qu.textContent="張";
+    qc.append(qm,qv,qp2,qu); qr.append(ql,qc); card.appendChild(qr);
+    return card;
+  }
+
+  const bCard=makeLegCard(bArr,bClass,bL,"sel_b",bSel,"Ask",e=>{bSel=e.target.value;result=null;render();});
+  legsDiv.appendChild(bCard);
+  if(!isSingle){
+    const sCard=makeLegCard(sArr,"leg sell",sL,"sel_s",sSel,"Bid",e=>{sSel=e.target.value;result=null;render();});
+    legsDiv.appendChild(sCard);
+    const swapBtn=document.createElement("button"); swapBtn.className="swap-btn"; swapBtn.textContent="⇄ 互換行權價";
+    swapBtn.onclick=()=>{const t=bSel;bSel=sSel;sSel=t;result=null;render();}; app.appendChild(swapBtn);
+  }
+
+  // Calc button
+  const calcBtn=document.createElement("button"); calcBtn.className="calc-btn";
+  calcBtn.innerHTML='<svg width="20" height="20" viewBox="0 0 20 20" fill="none"><polyline points="2,14 7,8 11,11 18,4" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><polyline points="14,4 18,4 18,8" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg><span>計 算 損 益</span>';
+  calcBtn.onclick=doCalc; app.appendChild(calcBtn);
+
+  // Result
+  if(result){
+    const {maxP,maxL,be,bK,bP,sK,sP}=result;
+    const unlimited=sk==="call"||sk==="put";
+    const mpS=unlimited?"∞":"$"+maxP.toFixed(0);
+    const mpSub=unlimited?"":"+"+((maxP/maxL)*100).toFixed(0)+"%";
+    const rorS=unlimited?"∞":((maxP/maxL)*100).toFixed(0)+"%";
+    const beS=be!=null?"$"+be.toFixed(2):"—";
+    const rb=document.createElement("div"); rb.className="result-box";
+    const rt=document.createElement("div"); rt.className="rtitle"; rt.textContent="損益總覽"; rb.appendChild(rt);
+    // metrics
+    const mg=document.createElement("div"); mg.className="metrics";
+    [{cls:"g",label:"最大獲利",val:mpS,sub:mpSub},{cls:"r",label:"最大虧損",val:"-$"+maxL.toFixed(0),sub:"-"+((maxL/(maxL+(maxP||maxL)))*100).toFixed(0)+"%"},{cls:"gr",label:"報酬率",val:rorS,sub:""},{cls:"p",label:"損益平衡",val:beS,sub:""}].forEach(m=>{
+      const md=document.createElement("div"); md.className="metric "+m.cls;
+      md.innerHTML='<div class="mlabel">'+m.label+'</div><div class="mval">'+m.val+'</div>'+(m.sub?'<div class="msub">'+m.sub+'</div>':'');
+      mg.appendChild(md);
+    });
+    rb.appendChild(mg);
+    // SVG
+    const svgEl=makeSVG(sk,bK,bP,sK,sP);
+    if(svgEl) rb.appendChild(svgEl);
+    // Ladder
+    rb.appendChild(makeLadder(sk,bK,bP,sK,sP,maxL,be));
+    // Save btn
+    const sb=document.createElement("button"); sb.className="save-btn"; sb.textContent="⭐ 收藏這個組合";
+    rb.appendChild(sb);
+    app.appendChild(rb);
+  }
+}
+
+function doCalc(){
+  const bArr=getArr(), sArr=getSArr();
+  const bRow=bArr.find(r=>r.k==bSel);
+  const sRow=sArr.find(r=>r.k==sSel);
+  if(!bRow){alert("請選擇買入行權價");return;}
+  if((sk==="bull"||sk==="bear")&&!sRow){alert("請選擇賣出行權價");return;}
+  const bK=bRow.k, bP=bRow.ask;
+  const sK=sRow?sRow.k:0, sP=sRow?sRow.bid:0;
+  let maxP,maxL,be;
+  if(sk==="bull"){const nc=bP-sP;maxP=(sK-bK-nc)*100;maxL=nc*100;be=bK+nc;}
+  else if(sk==="bear"){const nc=bP-sP;maxP=(bK-sK-nc)*100;maxL=nc*100;be=bK-nc;}
+  else if(sk==="call"){maxP=null;maxL=bP*100;be=bK+bP;}
+  else{maxP=null;maxL=bP*100;be=bK-bP;}
+  result={maxP,maxL,be,bK,bP,sK,sP};
+  render();
+}
+
+render();
+</script>
+"""
+        components.html(component_html, height=600, scrolling=True)
 
 # ══════ TAB 2 ══════
 with tab2:
