@@ -498,7 +498,7 @@ select{-webkit-appearance:none;appearance:none;background:#1C2128;border:1px sol
 <div id="app"></div>
 
 <script>
-const DATA = """ + data_js + """;
+const DATA = JSON.parse(''' + data_js + ''');
 const CALLS = DATA.calls;
 const PUTS  = DATA.puts;
 const CUR   = DATA.cur;
@@ -638,11 +638,22 @@ function render(){
     const lb=document.createElement("div"); lb.className="leg-label"; lb.textContent="履約價 (Strike)"; card.appendChild(lb);
     const sel=document.createElement("select"); sel.id=selId;
     const opt0=document.createElement("option"); opt0.value=""; opt0.textContent="點此選擇行權價"; sel.appendChild(opt0);
+    // Find closest strike to current price for default display position
+    const atm=arr.reduce((a,b)=>Math.abs(b.k-CUR)<Math.abs(a.k-CUR)?b:a,arr[0]||{k:0});
     arr.forEach(r=>{
       const o=document.createElement("option"); o.value=r.k;
-      o.textContent="$"+r.k+(r.k%1===0?"":"")+"  ("+side+" $"+(side==="Ask"?r.ask.toFixed(2):r.bid.toFixed(2))+")";
+      const isATM=Math.abs(r.k-CUR)<0.01;
+      o.textContent=(isATM?"▶ ":"")+"$"+r.k+"  ("+side+" $"+(side==="Ask"?r.ask.toFixed(2):r.bid.toFixed(2))+")";
       if(r.k==selVal) o.selected=true; sel.appendChild(o);
     });
+    // Scroll select to ATM position if nothing selected yet
+    if(!selVal&&atm.k){
+      setTimeout(()=>{
+        const opts=Array.from(sel.options);
+        const atmIdx=opts.findIndex(o=>parseFloat(o.value)===atm.k);
+        if(atmIdx>0) sel.selectedIndex=atmIdx;
+      },0);
+    }
     sel.onchange=onchange; card.appendChild(sel);
     const row=arr.find(r=>r.k==selVal);
     if(row){
