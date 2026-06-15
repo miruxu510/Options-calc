@@ -11,7 +11,7 @@ st.markdown("""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap');
 *{font-family:Inter,-apple-system,sans-serif!important;box-sizing:border-box}
-.stApp{background:#0D1117;color:#E6EDF3}
+.stApp{background:#0D1117;color:#E6EDF3}.stApp>div:first-child{padding-top:0!important}[data-testid="stAppViewContainer"]{padding-top:0!important}.block-container{padding-top:0!important}
 .main .block-container{padding:0 0 80px;max-width:430px}
 #MainMenu,footer,header{visibility:hidden}
 [data-testid="stToolbar"]{display:none}
@@ -30,6 +30,10 @@ st.markdown("""
 .stSuccess{background:#0D4429!important;border:1px solid #1A6B36!important;border-radius:10px!important;color:#3FB950!important}
 .stError{background:#4A1015!important;border:1px solid #8B1A1A!important;border-radius:10px!important;color:#F85149!important}
 hr{border-color:#30363D!important;margin:14px 0!important}
+section[data-testid="stSidebar"]{display:none}
+.stApp header{display:none!important}
+div[data-testid="stDecoration"]{display:none!important}
+div[data-testid="stStatusWidget"]{display:none!important}
 [data-testid="stFileUploader"]{background:#1C2128!important;border:1.5px dashed #30363D!important;border-radius:12px!important}
 </style>
 """, unsafe_allow_html=True)
@@ -53,7 +57,28 @@ def compress(uf):
 # ── yfinance ─────────────────────────────────────────
 @st.cache_data(ttl=60)
 def get_info(sym):
-    if not HAS_YF or not sym: return {}
+    if not sym: return {}
+    # Try Polygon for price first
+    poly_key = st.secrets.get("POLYGON_API_KEY","")
+    poly_out = {}
+    if poly_key:
+        try:
+            import urllib.request, json as _j
+            url = f"https://api.polygon.io/v2/snapshot/locale/us/markets/stocks/tickers/{sym}?apiKey={poly_key}"
+            req = urllib.request.Request(url, headers={"User-Agent":"Mozilla/5.0"})
+            res = urllib.request.urlopen(req, timeout=8)
+            data = _j.loads(res.read())
+            t = data.get("ticker",{})
+            day = t.get("day",{}); prev = t.get("prevDay",{})
+            price = t.get("lastTrade",{}).get("p") or day.get("c")
+            prev_c = prev.get("c")
+            if price:
+                poly_out["price"] = round(float(price),2)
+                if prev_c:
+                    poly_out["change"] = round(float(price)-float(prev_c),2)
+                    poly_out["pct"]    = round((float(price)-float(prev_c))/float(prev_c)*100,2)
+        except: pass
+    if not HAS_YF or not sym: return poly_out
     try:
         t=yf.Ticker(sym); out={}
         try:
@@ -87,8 +112,11 @@ def get_info(sym):
                 ed=cal.get("Earnings Date")
                 if ed: out["nextER"]=str(ed[0] if isinstance(ed,list) else ed)[:10]
         except: pass
+        # Merge polygon price if yfinance didn't get it
+        if poly_out.get('price') and not out.get('price'): out['price']=poly_out['price']
+        if poly_out.get('change') and not out.get('change'): out['change']=poly_out['change']; out['pct']=poly_out.get('pct',0)
         return out
-    except: return {}
+    except: return poly_out
 
 @st.cache_data(ttl=120)
 def get_expiries(sym):
@@ -98,6 +126,46 @@ def get_expiries(sym):
 
 @st.cache_data(ttl=60)
 def get_chain(sym, exp):
+    # Try Polygon first, fallback to yfinance
+    poly_key = st.secrets.get("POLYGON_API_KEY","")
+    if poly_key:
+        try:
+            import urllib.request, json as _j
+            # exp format: 2026-06-18 -> 20260618
+            exp_fmt = exp.replace("-","")
+            # Get calls
+            url_c = f"https://api.polygon.io/v3/snapshot/options/{sym}?expiration_date={exp}&contract_type=call&limit=100&apiKey={poly_key}"
+            req = urllib.request.Request(url_c, headers={"User-Agent":"Mozilla/5.0"})
+            res = urllib.request.urlopen(req, timeout=8)
+            data = _j.loads(res.read())
+            calls = []
+            for r in data.get("results",[]):
+                d = r.get("details",{}); q = r.get("day",{})
+                k = d.get("strike_price",0)
+                bid = r.get("last_quote",{}).get("bid",0) or q.get("close",0)*0.95
+                ask = r.get("last_quote",{}).get("ask",0) or q.get("close",0)*1.05
+                if k>0 and (bid>0 or ask>0):
+                    calls.append({"k":round(k,1),"bid":round(bid,2),"ask":round(ask,2)})
+            # Get puts
+            url_p = f"https://api.polygon.io/v3/snapshot/options/{sym}?expiration_date={exp}&contract_type=put&limit=100&apiKey={poly_key}"
+            req = urllib.request.Request(url_p, headers={"User-Agent":"Mozilla/5.0"})
+            res = urllib.request.urlopen(req, timeout=8)
+            data = _j.loads(res.read())
+            puts = []
+            for r in data.get("results",[]):
+                d = r.get("details",{}); q = r.get("day",{})
+                k = d.get("strike_price",0)
+                bid = r.get("last_quote",{}).get("bid",0) or q.get("close",0)*0.95
+                ask = r.get("last_quote",{}).get("ask",0) or q.get("close",0)*1.05
+                if k>0 and (bid>0 or ask>0):
+                    puts.append({"k":round(k,1),"bid":round(bid,2),"ask":round(ask,2)})
+            calls.sort(key=lambda r:r["k"]); puts.sort(key=lambda r:r["k"])
+            if calls or puts:
+                return calls, puts
+        except Exception as e:
+            st.warning(f"Polygon 載入失敗，改用 yfinance: {e}")
+
+    # Fallback: yfinance
     if not HAS_YF or not sym or not exp: return [],[]
     try:
         opt=yf.Ticker(sym).option_chain(exp)
@@ -108,11 +176,10 @@ def get_chain(sym, exp):
                 bid=r.get("bid",0) or 0
                 ask=r.get("ask",0) or 0
                 last=r.get("lastPrice",0) or 0
-                # Use lastPrice as fallback when bid/ask are 0 (after hours)
                 if bid==0 and ask==0 and last>0:
                     bid=round(last*0.95,2); ask=round(last*1.05,2)
                 if k>0 and (bid>0 or ask>0 or last>0):
-                    rows.append({"k":k,"bid":round(bid,2),"ask":round(ask if ask>0 else last,2),"last":round(last,2)})
+                    rows.append({"k":k,"bid":round(bid,2),"ask":round(ask if ask>0 else last,2)})
             return rows
         cols=[c for c in ["strike","bid","ask","lastPrice"] if c in opt.calls.columns]
         calls=chain_rows(opt.calls[cols].dropna(subset=["strike"]))
@@ -760,7 +827,6 @@ render();
 </script>
 """
         component_html = component_html.replace("__DATA_PLACEHOLDER__", data_js)
-        st.caption(f"載入 {len(calls_f)} Call / {len(puts_f)} Put 行權價")
 
         components.html(component_html, height=900, scrolling=True)
 
