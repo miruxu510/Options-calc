@@ -237,10 +237,21 @@ def make_svg_py(sk,bK,bP,sK,sP,cur):
             f'</svg>')
 
 def make_ladder_py(sk,bK,bP,sK,sP,maxL,be,cur):
-    spread=abs(bK-sK) if sK else bP*5
-    step=1 if spread<5 else 1 if spread<=10 else 2.5 if spread<=20 else 5 if spread<=50 else 10
-    lo=math.floor(min([bK]+([sK]if sK else[])+[cur])*0.88/step)*step
-    hi=math.ceil(max([bK]+([sK]if sK else[])+[cur])*1.12/step)*step
+    if sK:
+        spread=abs(bK-sK)
+        step=1 if spread<5 else 1 if spread<=10 else 2.5 if spread<=20 else 5 if spread<=50 else 10
+        lo=math.floor(min(bK,sK,cur)*0.88/step)*step
+        hi=math.ceil( max(bK,sK,cur)*1.12/step)*step
+    else:
+        # Single leg: step by price level, center on BE
+        step=5 if cur>500 else 2.5 if cur>200 else 2 if cur>100 else 1
+        be_price=bK+bP if sk=="call" else bK-bP
+        if sk=="call":
+            lo=math.floor((be_price-step*3)/step)*step
+            hi=math.ceil( (be_price+step*17)/step)*step
+        else:
+            lo=math.floor((be_price-step*17)/step)*step
+            hi=math.ceil( (be_price+step*3)/step)*step
     rows=[]; p=lo
     while p<=hi+0.001:
         v=calc_pnl(sk,bK,bP,sK,sP,p); ret=v/maxL*100 if maxL else 0
@@ -248,16 +259,14 @@ def make_ladder_py(sk,bK,bP,sK,sP,maxL,be,cur):
         im=(sk=="bull" and sK and p>=sK)or(sk=="bear" and sK and p<=sK)
         rows.append({"p":p,"v":v,"ret":ret,"nb":nb,"im":im})
         p=round(p+step,3)
-    mi=0
-    for i in range(1,len(rows)):
-        if rows[i]["v"]!=rows[0]["v"]: mi=max(0,i-1); break
-    mxi=len(rows)-1
     if sK:
+        mi=0
+        for i in range(1,len(rows)):
+            if rows[i]["v"]!=rows[0]["v"]: mi=max(0,i-1); break
+        mxi=len(rows)-1
         for i,r in enumerate(rows):
             if r["im"]: mxi=min(i+5,len(rows)-1); break
-    else:
-        mxi=min(mi+19,len(rows)-1)  # single leg: 20 rows
-    rows=rows[mi:mxi+1]
+        rows=rows[mi:mxi+1]
     ss=sm(step)
     h=('<div style="background:#1C2128;border-radius:12px;overflow:hidden;margin-top:12px">'
        '<div style="padding:8px 12px;display:flex;justify-content:space-between;border-bottom:1px solid #30363D">'
@@ -494,10 +503,10 @@ with tab1:
 
     if (calls_d or puts_d) and info.get("price",0)>0:
         cur=float(info["price"])
-        calls_f=sorted([r for r in calls_d if cur*0.75<=r["k"]<=cur*1.25 and(r["bid"]>0 or r["ask"]>0)],key=lambda r:r["k"])
-        puts_f=sorted([r for r in puts_d if cur*0.75<=r["k"]<=cur*1.25 and(r["bid"]>0 or r["ask"]>0)],key=lambda r:r["k"])
-        if not calls_f: calls_f=sorted([r for r in calls_d if cur*0.75<=r["k"]<=cur*1.25],key=lambda r:r["k"])
-        if not puts_f: puts_f=sorted([r for r in puts_d if cur*0.75<=r["k"]<=cur*1.25],key=lambda r:r["k"])
+        calls_f=sorted([r for r in calls_d if cur*0.50<=r["k"]<=cur*1.50 and(r["bid"]>0 or r["ask"]>0)],key=lambda r:r["k"])
+        puts_f=sorted([r for r in puts_d if cur*0.50<=r["k"]<=cur*1.50 and(r["bid"]>0 or r["ask"]>0)],key=lambda r:r["k"])
+        if not calls_f: calls_f=sorted([r for r in calls_d if cur*0.50<=r["k"]<=cur*1.50],key=lambda r:r["k"])
+        if not puts_f: puts_f=sorted([r for r in puts_d if cur*0.50<=r["k"]<=cur*1.50],key=lambda r:r["k"])
 
         data_js=json.dumps({"cur":cur,"calls":calls_f,"puts":puts_f})
 
@@ -615,10 +624,17 @@ with tab1:
 'sv.innerHTML=\'<defs><clipPath id="cp1"><rect x="\'+pX+\'" y="\'+pT+\'" width="\'+( W-2*pX)+\'" height="\'+Math.max(zY-pT,0).toFixed(1)+\'"/></clipPath><clipPath id="cp2"><rect x="\'+pX+\'" y="\'+zY.toFixed(1)+\'" width="\'+( W-2*pX)+\'" height="\'+Math.max(pH-(zY-pT)+pB+4,0).toFixed(1)+\'"/></clipPath></defs><line x1="\'+pX+\'" y1="\'+zY.toFixed(1)+\'" x2="\'+( W-pX)+\'" y2="\'+zY.toFixed(1)+\'" stroke="#2A2A2A" stroke-width="1" stroke-dasharray="4 3"/>\'+tk+cl+\'<path d="\'+fd+\'" fill="#4ADE80" opacity=".18" clip-path="url(#cp1)"/><path d="\'+fd+\'" fill="#F87171" opacity=".18" clip-path="url(#cp2)"/><path d="\'+ld+\'" fill="none" stroke="#4ADE80" stroke-width="2.5" stroke-linejoin="round" clip-path="url(#cp1)"/><path d="\'+ld+\'" fill="none" stroke="#F87171" stroke-width="2.5" stroke-linejoin="round" clip-path="url(#cp2)"/>\'+ds+be2+\'<text x="\'+pX1+\'" y="\'+bY+\'" fill="#4ADE80" font-size="8" font-weight="700" text-anchor="\'+pA1+\'">最大獲利</text><text x="\'+pX1+\'" y="\'+bY2+\'" fill="#4ADE80" font-size="12" font-weight="800" text-anchor="\'+pA1+\'">\'+mp+\'</text><text x="\'+lX1+\'" y="\'+bY+\'" fill="#F87171" font-size="8" font-weight="700" text-anchor="\'+lA1+\'">最大虧損</text><text x="\'+lX1+\'" y="\'+bY2+\'" fill="#F87171" font-size="12" font-weight="800" text-anchor="\'+lA1+\'">\'+ml+\'</text>\';'
 'return sv;}'
 'function mld(sk,bK,bP,sK,sP,mL,be){'
-'const sp=sK?Math.abs(bK-sK):bP*5;'
-'const st=sp<5?1:sp<=10?1:sp<=20?2.5:sp<=50?5:10;'
-'const lo=Math.floor(Math.min(bK,sK||bK,CUR)*.88/st)*st;'
-'const hi=Math.ceil(Math.max(bK,sK||bK,CUR)*1.12/st)*st;'
+'let st,lo,hi;'
+'if(sK){'
+'const sp=Math.abs(bK-sK);'
+'st=sp<5?1:sp<=10?1:sp<=20?2.5:sp<=50?5:10;'
+'lo=Math.floor(Math.min(bK,sK,CUR)*.88/st)*st;'
+'hi=Math.ceil(Math.max(bK,sK,CUR)*1.12/st)*st;'
+'}else{'
+'st=CUR>500?5:CUR>200?2.5:CUR>100?2:1;'
+'const bp=sk==="call"?bK+bP:bK-bP;'
+'if(sk==="call"){lo=Math.floor((bp-st*3)/st)*st;hi=Math.ceil((bp+st*17)/st)*st;}'
+'else{lo=Math.floor((bp-st*17)/st)*st;hi=Math.ceil((bp+st*3)/st)*st;}}'
 'const ar=[];'
 'for(let p=lo;p<=hi+.001;p=Math.round((p+st)*1000)/1000){'
 'const v=pnl(sk,bK,bP,sK,sP,p),rt=mL?v/mL*100:0;'
@@ -626,9 +642,9 @@ with tab1:
 'const im=(sk==="bull"&&sK&&p>=sK)||(sk==="bear"&&sK&&p<=sK);'
 'ar.push({p,v,rt,nb,im});}'
 'let mi=0,mxi=ar.length-1;'
+'if(sK){'
 'for(let i=1;i<ar.length;i++){if(ar[i].v!==ar[0].v){mi=Math.max(0,i-1);break;}}'
-'if(sK){for(let i=0;i<ar.length;i++){if(ar[i].im){mxi=Math.min(i+5,ar.length-1);break;}}}'
-'else{mxi=Math.min(mi+19,ar.length-1);}'
+'for(let i=0;i<ar.length;i++){if(ar[i].im){mxi=Math.min(i+5,ar.length-1);break;}}}'
 'const rw=ar.slice(mi,mxi+1);'
 'const ss=st%1===0?st.toFixed(0):st.toFixed(1);'
 'const w=document.createElement("div");w.className="ld";'
