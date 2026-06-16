@@ -183,8 +183,10 @@ def make_svg_py(sk,bK,bP,sK,sP,cur):
             f=abs(prev)/(abs(prev)+abs(c)); be=lo2+(hi2-lo2)*(i-1+f)/600; break
         prev=c
     allk=[bK,cur]+([sK]if sK else[])+([be]if be else[])
-    center=be or cur; span=max(max(allk)-min(allk),cur*0.16)*1.5
-    lo=center-span*0.55; hi=center+span*0.55
+    center=be or cur; span=max(max(allk)-min(allk),cur*0.20)*1.6
+    lo_ratio=0.65 if (unlimited and sk=="put") else 0.55
+    hi_ratio=0.45 if (unlimited and sk=="put") else 0.55
+    lo=center-span*lo_ratio; hi=center+span*hi_ratio
     pts=[lo+(hi-lo)*i/200 for i in range(201)]
     pnls=[calc_pnl(sk,bK,bP,sK,sP,p) for p in pts]
     maxV=max(pnls); minV=min(pnls)
@@ -203,7 +205,7 @@ def make_svg_py(sk,bK,bP,sK,sP,cur):
     for dk,buy in [(bK,True)]+([( sK,False)]if sK else[]):
         if not(lo<dk<hi): continue
         dy=cy(calc_pnl(sk,bK,bP,sK,sP,dk)); sx=cx(dk); mc="#60A5FA" if buy else "#FB923C"
-        lbl=("買入" if buy else "賣出")+f" ${dk:.0f}"; by2=(min(dy-27,zY-35)) if buy else (max(dy+11,zY+5))
+        lbl=("買入" if buy else "賣出")+f" ${dk:.0f}"; by2=dy-30 if buy else dy+14
         ds+=(f'<rect x="{sx-34:.1f}" y="{by2:.1f}" width="68" height="14" rx="3" fill="#0A0A0A" opacity=".92"/>'
              f'<text x="{sx:.1f}" y="{by2+11:.1f}" fill="{mc}" font-size="9" text-anchor="middle" font-weight="700">{lbl}</text>'
              f'<circle cx="{sx:.1f}" cy="{dy:.1f}" r="5" fill="{mc}"/><circle cx="{sx:.1f}" cy="{dy:.1f}" r="9" fill="{mc}" opacity=".18"/>')
@@ -253,6 +255,8 @@ def make_ladder_py(sk,bK,bP,sK,sP,maxL,be,cur):
     if sK:
         for i,r in enumerate(rows):
             if r["im"]: mxi=min(i+5,len(rows)-1); break
+    else:
+        mxi=min(mi+19,len(rows)-1)  # single leg: 20 rows
     rows=rows[mi:mxi+1]
     ss=sm(step)
     h=('<div style="background:#1C2128;border-radius:12px;overflow:hidden;margin-top:12px">'
@@ -579,8 +583,8 @@ with tab1:
 'const ul=sk==="call"||sk==="put",pr=sk==="bull"||sk==="call";'
 'const b=be(sk,bK,bP,sK,sP);'
 'const ak=[bK,CUR,...(sK?[sK]:[]),...(b?[b]:[])];'
-'const ct=b||CUR,sp=Math.max(Math.max(...ak)-Math.min(...ak),CUR*.16)*1.5;'
-'const lo=ct-sp*.55,hi=ct+sp*.55;'
+'const ct=b||CUR,sp=Math.max(Math.max(...ak)-Math.min(...ak),CUR*.20)*1.6;'
+'const lo=ct-sp*(ul&&sk==="put"?.65:.55),hi=ct+sp*(ul&&sk==="put"?.45:.55);'
 'const pts=Array.from({length:201},(_,i)=>lo+(hi-lo)*i/200);'
 'const pnls=pts.map(p=>pnl(sk,bK,bP,sK,sP,p));'
 'const mx=Math.max(...pnls),mn=Math.min(...pnls);'
@@ -597,7 +601,7 @@ with tab1:
 'const ds=[[bK,true],...(sK?[[sK,false]]:[])].map(([dk,buy])=>{'
 'if(dk<lo||dk>hi)return"";'
 'const mc=buy?"#60A5FA":"#FB923C",dy=cy(pnl(sk,bK,bP,sK,sP,dk)),sx=cx(dk);'
-'const ab=buy?(dy>H*.5?true:false):(dy<H*.5?false:true),b2=buy?Math.min(dy-27,zY-36):Math.max(dy+11,zY+6),lb=(buy?"買入":"賣出")+" $"+dk;'
+'const bOffset=buy?-30:14;const b2=dy+bOffset;const lb=(buy?"買入":"賣出")+" $"+dk;'
 'return\'<rect x="\'+( sx-34).toFixed(1)+\'" y="\'+b2.toFixed(1)+\'" width="68" height="14" rx="3" fill="#0A0A0A" opacity=".92"/><text x="\'+sx.toFixed(1)+\'" y="\'+( b2+11).toFixed(1)+\'" fill="\'+mc+\'" font-size="9" text-anchor="middle" font-weight="700">\'+lb+\'</text><circle cx="\'+sx.toFixed(1)+\'" cy="\'+dy.toFixed(1)+\'" r="5" fill="\'+mc+\'"/><circle cx="\'+sx.toFixed(1)+\'" cy="\'+dy.toFixed(1)+\'" r="9" fill="\'+mc+\'" opacity=".18"/>\';'
 '}).join("");'
 'const be2=b&&lo<b&&b<hi?\'<rect x="\'+( cx(b)-36).toFixed(1)+\'" y="\'+( zY-32).toFixed(1)+\'" width="72" height="24" rx="4" fill="#0A0A0A" opacity=".92"/><text x="\'+cx(b).toFixed(1)+\'" y="\'+( zY-20).toFixed(1)+\'" fill="#F0B429" font-size="8" text-anchor="middle" font-weight="600">損益平衡</text><text x="\'+cx(b).toFixed(1)+\'" y="\'+( zY-9).toFixed(1)+\'" fill="#F0B429" font-size="10" text-anchor="middle" font-weight="800">$\'+b.toFixed(2)+\'</text><circle cx="\'+cx(b).toFixed(1)+\'" cy="\'+zY.toFixed(1)+\'" r="5" fill="#F0B429"/><circle cx="\'+cx(b).toFixed(1)+\'" cy="\'+zY.toFixed(1)+\'" r="9" fill="#F0B429" opacity=".22"/>\':"";'
@@ -624,6 +628,7 @@ with tab1:
 'let mi=0,mxi=ar.length-1;'
 'for(let i=1;i<ar.length;i++){if(ar[i].v!==ar[0].v){mi=Math.max(0,i-1);break;}}'
 'if(sK){for(let i=0;i<ar.length;i++){if(ar[i].im){mxi=Math.min(i+5,ar.length-1);break;}}}'
+'else{mxi=Math.min(mi+19,ar.length-1);}'
 'const rw=ar.slice(mi,mxi+1);'
 'const ss=st%1===0?st.toFixed(0):st.toFixed(1);'
 'const w=document.createElement("div");w.className="ld";'
