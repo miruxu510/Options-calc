@@ -260,12 +260,24 @@ def make_ladder_py(sk,bK,bP,sK,sP,maxL,be,cur):
         rows.append({"p":p,"v":v,"ret":ret,"nb":nb,"im":im})
         p=round(p+step,3)
     if sK:
-        mi=0
-        for i in range(1,len(rows)):
-            if rows[i]["v"]!=rows[0]["v"]: mi=max(0,i-1); break
-        mxi=len(rows)-1
-        for i,r in enumerate(rows):
-            if r["im"]: mxi=min(i+5,len(rows)-1); break
+        if sk=="bull":
+            # bull: trim low repeating floor at start, MAX+5 at end
+            mi=0
+            for i in range(1,len(rows)):
+                if rows[i]["v"]!=rows[0]["v"]: mi=max(0,i-1); break
+            mxi=len(rows)-1
+            for i,r in enumerate(rows):
+                if r["im"]: mxi=min(i+5,len(rows)-1); break
+        else:
+            # bear: MAX is at low prices (start), trim repeating MAX at start, floor at end
+            first_non_max=len(rows)-1
+            for i in range(len(rows)):
+                if not rows[i]["im"]: first_non_max=i; break
+            mi=max(0,first_non_max-5)
+            mxi=len(rows)-1
+            floor_val=rows[-1]["v"]
+            for i in range(len(rows)-1,0,-1):
+                if rows[i]["v"]!=floor_val: mxi=min(i+1,len(rows)-1); break
         rows=rows[mi:mxi+1]
     ss=sm(step)
     h=('<div style="background:#1C2128;border-radius:12px;overflow:hidden;margin-top:12px">'
@@ -644,8 +656,14 @@ with tab1:
 'ar.push({p,v,rt,nb,im});}'
 'let mi=0,mxi=ar.length-1;'
 'if(sK){'
+'if(sk==="bull"){'
 'for(let i=1;i<ar.length;i++){if(ar[i].v!==ar[0].v){mi=Math.max(0,i-1);break;}}'
 'for(let i=0;i<ar.length;i++){if(ar[i].im){mxi=Math.min(i+5,ar.length-1);break;}}}'
+'else{'
+'let fnm=ar.length-1;for(let i=0;i<ar.length;i++){if(!ar[i].im){fnm=i;break;}}'
+'mi=Math.max(0,fnm-5);'
+'const fv=ar[ar.length-1].v;'
+'for(let i=ar.length-1;i>0;i--){if(ar[i].v!==fv){mxi=Math.min(i+1,ar.length-1);break;}}}}'
 'const rw=ar.slice(mi,mxi+1);'
 'const ss=st%1===0?st.toFixed(0):st.toFixed(1);'
 'const w=document.createElement("div");w.className="ld";'
