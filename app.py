@@ -15,7 +15,7 @@ st.markdown("""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap');
 *{font-family:Inter,-apple-system,sans-serif!important;box-sizing:border-box}
-.stApp{background:#0D1117;color:#E6EDF3}
+.stApp{background:#0D1117;color:#E6EDF3}.stApp>div{padding-top:0!important}.block-container{padding-top:0!important}[data-testid="stAppViewContainer"]>section{padding-top:0!important}
 .main .block-container{padding:0 0 80px;max-width:430px}
 #MainMenu,footer,header{visibility:hidden}
 [data-testid="stToolbar"]{display:none}
@@ -203,7 +203,7 @@ def make_svg_py(sk,bK,bP,sK,sP,cur):
     for dk,buy in [(bK,True)]+([( sK,False)]if sK else[]):
         if not(lo<dk<hi): continue
         dy=cy(calc_pnl(sk,bK,bP,sK,sP,dk)); sx=cx(dk); mc="#60A5FA" if buy else "#FB923C"
-        lbl=("買入" if buy else "賣出")+f" ${dk:.0f}"; ab=dy>H*.45; by2=dy-27 if ab else dy+11
+        lbl=("買入" if buy else "賣出")+f" ${dk:.0f}"; by2=(min(dy-27,zY-35)) if buy else (max(dy+11,zY+5))
         ds+=(f'<rect x="{sx-34:.1f}" y="{by2:.1f}" width="68" height="14" rx="3" fill="#0A0A0A" opacity=".92"/>'
              f'<text x="{sx:.1f}" y="{by2+11:.1f}" fill="{mc}" font-size="9" text-anchor="middle" font-weight="700">{lbl}</text>'
              f'<circle cx="{sx:.1f}" cy="{dy:.1f}" r="5" fill="{mc}"/><circle cx="{sx:.1f}" cy="{dy:.1f}" r="9" fill="{mc}" opacity=".18"/>')
@@ -544,7 +544,7 @@ with tab1:
 '.lc{display:grid;grid-template-columns:1fr 1fr 1fr;background:#21262D;padding:5px 12px;border-bottom:1px solid #30363D}'
 '.lch{font-size:9px;color:#484F58;font-weight:700;text-transform:uppercase;letter-spacing:.5px}'
 '.lch:not(:first-child){text-align:right}'
-'.lr{display:grid;grid-template-columns:1fr 1fr 1fr;padding:6px 12px;border-bottom:1px solid #161B22}'
+'.lrw{display:grid;grid-template-columns:1fr 1fr 1fr;padding:6px 12px;border-bottom:1px solid #161B22}'
 '.lp{font-size:12px;color:#E6EDF3;font-weight:500;display:flex;align-items:center;gap:4px}'
 '.lv,.lrt{font-size:12px;font-weight:600;text-align:right}'
 '.tag{font-size:8px;padding:1px 5px;border-radius:100px;font-weight:700}'
@@ -597,7 +597,7 @@ with tab1:
 'const ds=[[bK,true],...(sK?[[sK,false]]:[])].map(([dk,buy])=>{'
 'if(dk<lo||dk>hi)return"";'
 'const mc=buy?"#60A5FA":"#FB923C",dy=cy(pnl(sk,bK,bP,sK,sP,dk)),sx=cx(dk);'
-'const ab=dy>H*.45,b2=ab?dy-27:dy+11,lb=(buy?"買入":"賣出")+" $"+dk;'
+'const ab=buy?(dy>H*.5?true:false):(dy<H*.5?false:true),b2=buy?Math.min(dy-27,zY-36):Math.max(dy+11,zY+6),lb=(buy?"買入":"賣出")+" $"+dk;'
 'return\'<rect x="\'+( sx-34).toFixed(1)+\'" y="\'+b2.toFixed(1)+\'" width="68" height="14" rx="3" fill="#0A0A0A" opacity=".92"/><text x="\'+sx.toFixed(1)+\'" y="\'+( b2+11).toFixed(1)+\'" fill="\'+mc+\'" font-size="9" text-anchor="middle" font-weight="700">\'+lb+\'</text><circle cx="\'+sx.toFixed(1)+\'" cy="\'+dy.toFixed(1)+\'" r="5" fill="\'+mc+\'"/><circle cx="\'+sx.toFixed(1)+\'" cy="\'+dy.toFixed(1)+\'" r="9" fill="\'+mc+\'" opacity=".18"/>\';'
 '}).join("");'
 'const be2=b&&lo<b&&b<hi?\'<rect x="\'+( cx(b)-36).toFixed(1)+\'" y="\'+( zY-32).toFixed(1)+\'" width="72" height="24" rx="4" fill="#0A0A0A" opacity=".92"/><text x="\'+cx(b).toFixed(1)+\'" y="\'+( zY-20).toFixed(1)+\'" fill="#F0B429" font-size="8" text-anchor="middle" font-weight="600">損益平衡</text><text x="\'+cx(b).toFixed(1)+\'" y="\'+( zY-9).toFixed(1)+\'" fill="#F0B429" font-size="10" text-anchor="middle" font-weight="800">$\'+b.toFixed(2)+\'</text><circle cx="\'+cx(b).toFixed(1)+\'" cy="\'+zY.toFixed(1)+\'" r="5" fill="#F0B429"/><circle cx="\'+cx(b).toFixed(1)+\'" cy="\'+zY.toFixed(1)+\'" r="9" fill="#F0B429" opacity=".22"/>\':"";'
@@ -634,7 +634,7 @@ with tab1:
 'const ps="$"+(r.p%1===0?r.p.toFixed(0):r.p.toFixed(2));'
 'const tg=(r.nb?\'<span class="tag tbe">平衡</span>\':"\")+(r.im?\'<span class="tag tmax">MAX</span>\':\"\");'
 'const pv=(r.v>=0?"+":" ")+r.v.toFixed(0),rv=(r.rt>=0?"+":" ")+r.rt.toFixed(0)+"%";'
-'const ro=document.createElement("div");ro.className="lr";ro.style.background=bg;'
+'const ro=document.createElement("div");ro.className="lrw";ro.style.background=bg;'
 'ro.innerHTML=\'<span class="lp">\'+ps+tg+\'</span><span class="lv" style="color:\'+c+\'">\'+pv+\'</span><span class="lrt" style="color:\'+c+\'">\'+rv+\'</span>\';'
 'w.appendChild(ro);});'
 'return w;}'
