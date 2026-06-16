@@ -503,10 +503,11 @@ with tab1:
 
     if (calls_d or puts_d) and info.get("price",0)>0:
         cur=float(info["price"])
-        calls_f=sorted([r for r in calls_d if cur*0.50<=r["k"]<=cur*1.50 and(r["bid"]>0 or r["ask"]>0)],key=lambda r:r["k"])
-        puts_f=sorted([r for r in puts_d if cur*0.50<=r["k"]<=cur*1.50 and(r["bid"]>0 or r["ask"]>0)],key=lambda r:r["k"])
-        if not calls_f: calls_f=sorted([r for r in calls_d if cur*0.50<=r["k"]<=cur*1.50],key=lambda r:r["k"])
-        if not puts_f: puts_f=sorted([r for r in puts_d if cur*0.50<=r["k"]<=cur*1.50],key=lambda r:r["k"])
+        # Show all strikes with valid prices (no range filter)
+        calls_f=sorted([r for r in calls_d if r["bid"]>0 or r["ask"]>0],key=lambda r:r["k"])
+        puts_f=sorted([r for r in puts_d  if r["bid"]>0 or r["ask"]>0],key=lambda r:r["k"])
+        if not calls_f: calls_f=sorted(calls_d,key=lambda r:r["k"])
+        if not puts_f:  puts_f=sorted(puts_d, key=lambda r:r["k"])
 
         data_js=json.dumps({"cur":cur,"calls":calls_f,"puts":puts_f})
 
